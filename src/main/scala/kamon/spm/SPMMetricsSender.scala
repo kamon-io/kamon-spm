@@ -26,7 +26,7 @@ import akka.pattern.{ ask, pipe }
 import akka.util.Timeout
 import spray.json._
 
-import org.asynchttpclient.{ AsyncCompletionHandler, DefaultAsyncHttpClient, Response }
+import org.asynchttpclient.{ AsyncCompletionHandler, DefaultAsyncHttpClient, DefaultAsyncHttpClientConfig, Response }
 
 import scala.annotation.tailrec
 import scala.collection.immutable.{ Map, Queue }
@@ -38,9 +38,7 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
   import context._
   import SPMMetricsSender._
 
-  implicit val t = sendTimeout
-
-  val httpClient: HttpClient = new AsyncHttpClient(Logging(system, classOf[SPMMetricsSender]))
+  val httpClient: HttpClient = new AsyncHttpClient(sendTimeout, Logging(system, classOf[SPMMetricsSender]))
 
   implicit class ResponseSuccessFailure(resp: Response) {
     def isSuccess: Boolean =
@@ -207,8 +205,10 @@ trait HttpClient {
   def post(uri: String, payload: Array[Byte]): Future[Response]
 }
 
-class AsyncHttpClient(logger: LoggingAdapter) extends HttpClient {
-  protected val aclient = new DefaultAsyncHttpClient()
+class AsyncHttpClient(sendTimeout: Timeout, logger: LoggingAdapter) extends HttpClient {
+  val cf = new DefaultAsyncHttpClientConfig.Builder().setRequestTimeout(
+      sendTimeout.duration.toMillis.toInt).build()
+  val aclient = new DefaultAsyncHttpClient(cf)
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -221,7 +221,7 @@ class AsyncHttpClient(logger: LoggingAdapter) extends HttpClient {
         }
 
         override def onThrowable(t: Throwable): Unit =
-          logger.error(t, s"Unable to send metrics to InfluxDB: ${t.getMessage}")
+          logger.error(t, s"Unable to send metrics to SPM: ${t.getMessage}")
       })
     Future {
       blocking {
