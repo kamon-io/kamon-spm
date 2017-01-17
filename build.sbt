@@ -23,5 +23,5 @@ lazy val root = (project in file("."))
   .settings(formatSettings: _*)
   .settings(
       libraryDependencies ++=
-        compileScope(kamonCore, sprayCan, sprayClient, sprayRouting, sprayJson, sprayJsonLenses, akkaSlf4j, libThrift) ++
+        compileScope(kamonCore, asyncHttpClient, sprayJson, akkaSlf4j, libThrift) ++
         testScope(scalatest, akkaTestKit, slf4jApi, slf4jnop))

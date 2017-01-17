@@ -24,7 +24,6 @@ object Dependencies {
 
   val kamonVersion      = "0.6.3"
   val akkaVersion       = "2.3.16"
-  val sprayVersion      = "1.3.4"
   val slf4jVersion      = "1.7.7"
 
   val kamonCore         = "io.kamon"                  %%  "kamon-core"            % kamonVersion
@@ -33,12 +32,8 @@ object Dependencies {
   val akkaSlf4j         = "com.typesafe.akka"         %%  "akka-slf4j"            % akkaVersion
   val akkaTestKit       = "com.typesafe.akka"         %%  "akka-testkit"          % akkaVersion
 
-  val sprayCan          = "io.spray"                  %%  "spray-can"             % sprayVersion
-  val sprayRouting      = "io.spray"                  %%  "spray-routing"         % sprayVersion
-  val sprayTestkit      = "io.spray"                  %%  "spray-testkit"         % sprayVersion
-  val sprayClient       = "io.spray"                  %%  "spray-client"          % sprayVersion
+  val asyncHttpClient   = "org.asynchttpclient"       %   "async-http-client"     % "2.0.25"  
   val sprayJson         = "io.spray"                  %%  "spray-json"            % "1.3.3"
-  val sprayJsonLenses   = "net.virtual-void"          %%  "json-lenses"           % "0.6.1"
 
   val libThrift         = "org.apache.thrift"         %   "libthrift"             % "0.9.2"
   val slf4jApi          = "org.slf4j"                 %   "slf4j-api"             % slf4jVersion
