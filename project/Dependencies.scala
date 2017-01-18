@@ -41,7 +41,8 @@ object Dependencies {
 
 
   val scalatest         = "org.scalatest"             %%  "scalatest"             % "3.0.1"
-
+  val mockito           = "org.mockito"               %   "mockito-core"          % "2.6.3"
+  
   def compileScope   (deps: ModuleID*): Seq[ModuleID] = deps map (_ % "compile")
   def testScope      (deps: ModuleID*): Seq[ModuleID] = deps map (_ % "test")
 }

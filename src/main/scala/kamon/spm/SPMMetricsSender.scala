@@ -39,6 +39,8 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
   import SPMMetricsSender._
 
   val httpClient: HttpClient = new AsyncHttpClient(sendTimeout, Logging(system, classOf[SPMMetricsSender]))
+  var numberOfBatchesDroppedDueToQueueSize = 0
+  var numberOfRetriedBatches = 0
 
   implicit class ResponseSuccessFailure(resp: Response) {
     def isSuccess: Boolean =
@@ -150,7 +152,9 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
       become(sending(queue.enqueue(batches)))
     }
     case _: Send if queue.size >= maxQueueSize ⇒ {
-      log.warning(s"Send queue is full (${queue.size}). Rejecting metrics.")
+      numberOfBatchesDroppedDueToQueueSize = numberOfBatchesDroppedDueToQueueSize + 1
+      val batchesMessage = s"Number of dropped metrics batches: $numberOfBatchesDroppedDueToQueueSize"
+      log.warning(s"Send queue is full (${queue.size}). Rejecting metrics. $batchesMessage")
     }
     case Send(metrics) if metrics.isEmpty ⇒ /* do nothing */
     case Retry ⇒ {
@@ -162,7 +166,8 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
       context.system.scheduler.scheduleOnce(retryInterval, self, Retry)
     }
     case ScheduleRetry ⇒ {
-      log.warning("Metrics can't be sent. Scheduling retry.")
+      numberOfRetriedBatches = numberOfRetriedBatches + 1
+      log.warning("Metrics can't be sent. Scheduling retry. Total retries to date: $numberOfRetriedBatches")
       context.system.scheduler.scheduleOnce(retryInterval, self, Retry)
     }
   }
@@ -207,7 +212,7 @@ trait HttpClient {
 
 class AsyncHttpClient(sendTimeout: Timeout, logger: LoggingAdapter) extends HttpClient {
   val cf = new DefaultAsyncHttpClientConfig.Builder().setRequestTimeout(
-      sendTimeout.duration.toMillis.toInt).build()
+    sendTimeout.duration.toMillis.toInt).build()
   val aclient = new DefaultAsyncHttpClient(cf)
 
   import scala.concurrent.ExecutionContext.Implicits.global
