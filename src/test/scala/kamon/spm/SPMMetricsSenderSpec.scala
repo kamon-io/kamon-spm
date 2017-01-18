@@ -18,11 +18,9 @@ package kamon.spm
 
 import java.nio.charset.StandardCharsets
 
-import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
-import scala.concurrent.Promise
+import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Success
 
 import org.asynchttpclient.{ HttpResponseStatus, Response }
