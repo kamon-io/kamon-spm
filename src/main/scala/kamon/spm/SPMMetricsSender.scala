@@ -70,7 +70,6 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
     httpClient.post(s"$url$queryString", encodeTraceBody(metrics, segments, token)).recover {
       case t: Throwable ⇒ {
         log.error(t, "Can't post trace metrics.")
-        ScheduleRetry
       }
     }.pipeTo(self)
   }
