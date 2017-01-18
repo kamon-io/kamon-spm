@@ -18,16 +18,16 @@ package kamon.spm
 
 import java.nio.charset.StandardCharsets
 
-import scala.concurrent.{Await, Future, Promise}
+import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Success
 
 import org.asynchttpclient.{ HttpResponseStatus, Response }
-import org.mockito.Mockito._
-import org.scalatest.concurrent.Eventually.eventually
+import org.mockito.Mockito.{ mock, when }
+import org.scalatest.concurrent.Eventually._
 import org.scalatest.mockito.MockitoSugar
-import org.scalatest.time.SpanSugar
+import org.scalatest.time.{ Span, Seconds }
 
 import akka.actor.Props
 import akka.testkit.TestActorRef
@@ -38,7 +38,7 @@ import kamon.spm.SPMMetricsSender.Send
 import kamon.testkit.BaseKamonSpec
 import kamon.util.MilliTimestamp
 
-class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with MockitoSugar with SpanSugar {
+class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with MockitoSugar {
 
   private def testMetrics(prefix: String = ""): List[SPMMetric] = {
     (0 until 2).map { i ⇒
@@ -71,8 +71,8 @@ class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with
   }
 
   class MockedSPMMetricsSender(mockHttpClient: MockHttpClient, retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String,
-      token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends SPMMetricsSender(retryInterval, sendTimeout, maxQueueSize,
-      url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount) {
+    token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends SPMMetricsSender(retryInterval, sendTimeout, maxQueueSize,
+    url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount) {
     override val httpClient = mockHttpClient
   }
 
@@ -94,9 +94,9 @@ class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with
       val sender = TestActorRef(Props(new MockedSPMMetricsSender(mockHttpClient, 2 seconds, Timeout(5 seconds), 100, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
       sender ! Send(testMetrics())
 
-      val senderActor =  sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
-      eventually(timeout(5 seconds), interval(50 millis)) {
-        senderActor.numberOfRetriedBatches should atLeast(1)
+      val senderActor = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
+      eventually(timeout(Span(5, Seconds))) {
+        senderActor.numberOfRetriedBatches should be >= 1
       }
 
     }
@@ -111,8 +111,8 @@ class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with
 
       sender ! Send(testMetrics())
 
-      val senderActor =  sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
-      eventually(timeout(5 seconds), interval(50 millis)) {
+      val senderActor = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
+      eventually(timeout(Span(5, Seconds))) {
         senderActor.numberOfBatchesDroppedDueToQueueSize shouldEqual 1
       }
 

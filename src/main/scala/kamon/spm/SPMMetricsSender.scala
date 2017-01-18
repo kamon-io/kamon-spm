@@ -162,7 +162,8 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
       post(metrics)
     }
     case resp: Response if resp.isFailure ⇒ {
-      log.warning(s"Metrics can't be sent. Response status: ${resp.getStatusCode}. Scheduling retry.")
+      numberOfRetriedBatches = numberOfRetriedBatches + 1
+      log.warning(s"Metrics can't be sent. Response status: ${resp.getStatusCode}. Scheduling retry. Total retries to date: $numberOfRetriedBatches")
       context.system.scheduler.scheduleOnce(retryInterval, self, Retry)
     }
     case ScheduleRetry ⇒ {
