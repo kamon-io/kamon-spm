@@ -38,7 +38,6 @@ object Dependencies {
   val sprayTestkit      = "io.spray"                  %%  "spray-testkit"         % sprayVersion
   val sprayClient       = "io.spray"                  %%  "spray-client"          % sprayVersion
   val sprayJson         = "io.spray"                  %%  "spray-json"            % "1.3.3"
-  val sprayJsonLenses   = "net.virtual-void"          %%  "json-lenses"           % "0.6.1"
 
   val libThrift         = "org.apache.thrift"         %   "libthrift"             % "0.9.2"
   val slf4jApi          = "org.slf4j"                 %   "slf4j-api"             % slf4jVersion
