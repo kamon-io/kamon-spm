@@ -18,29 +18,46 @@ package kamon.spm
 
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 
 import akka.actor._
+import akka.event.{ Logging, LoggingAdapter }
 import akka.pattern.{ ask, pipe }
 import akka.util.Timeout
-import spray.http.Uri.Query
-import spray.http.{ HttpEntity, HttpResponse, Uri }
-import spray.httpx.RequestBuilding._
 import spray.json._
+
+import org.asynchttpclient.{ AsyncCompletionHandler, DefaultAsyncHttpClient, DefaultAsyncHttpClientConfig, Response }
 
 import scala.annotation.tailrec
 import scala.collection.immutable.{ Map, Queue }
+import scala.concurrent.blocking
 import scala.concurrent.duration._
+import scala.concurrent.Future
 
-class SPMMetricsSender(io: ActorRef, retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends Actor with ActorLogging {
+class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends Actor with ActorLogging {
   import context._
-  import kamon.spm.SPMMetricsSender._
+  import SPMMetricsSender._
 
-  implicit val t = sendTimeout
+  val httpClient: HttpClient = new AsyncHttpClient(sendTimeout, Logging(system, classOf[SPMMetricsSender]))
+  var numberOfBatchesDroppedDueToQueueSize = 0
+  var numberOfRetriedBatches = 0
+
+  implicit class ResponseSuccessFailure(resp: Response) {
+    def isSuccess: Boolean =
+      resp.hasResponseStatus() && resp.getStatusCode >= 200 && resp.getStatusCode <= 299
+    def isFailure: Boolean = !isSuccess
+  }
+
+  private def generateQueryString(queryMap: Map[String, String]): String = {
+    queryMap.map { case (key, value) ⇒ s"$key=$value" } match {
+      case Nil ⇒ ""
+      case xs  ⇒ s"?${xs.mkString("&")}"
+    }
+  }
 
   private def post(metrics: List[SPMMetric]): Unit = {
-    val query = Query("host" -> host, "token" -> token)
-    val entity = HttpEntity(encodeBody(metrics))
-    (io ? Post(Uri(url).withQuery(query)).withEntity(entity)).mapTo[HttpResponse].recover {
+    val queryString = generateQueryString(Map("host" -> host, "token" -> token))
+    httpClient.post(s"$url$queryString", encodeBody(metrics)).recover {
       case t: Throwable ⇒ {
         log.error(t, "Can't post metrics.")
         ScheduleRetry
@@ -49,9 +66,8 @@ class SPMMetricsSender(io: ActorRef, retryInterval: FiniteDuration, sendTimeout:
   }
 
   private def postTraces(metrics: List[SPMMetric], segments: List[SPMMetric]): Unit = {
-    val query = Query("host" -> host, "token" -> token)
-    val entity = HttpEntity(encodeTraceBody(metrics, segments, token))
-    (io ? Post(Uri(tracingUrl).withQuery(query)).withEntity(entity)).mapTo[HttpResponse].recover {
+    val queryString = generateQueryString(Map("host" -> host, "token" -> token))
+    httpClient.post(s"$url$queryString", encodeTraceBody(metrics, segments, token)).recover {
       case t: Throwable ⇒ {
         log.error(t, "Can't post trace metrics.")
       }
@@ -120,7 +136,7 @@ class SPMMetricsSender(io: ActorRef, retryInterval: FiniteDuration, sendTimeout:
   }
 
   def sending(queue: Queue[List[SPMMetric]]): Receive = {
-    case resp: HttpResponse if resp.status.isSuccess ⇒ {
+    case resp: Response if resp.isSuccess ⇒ {
       val (_, q) = queue.dequeue
       if (q.isEmpty) {
         become(idle)
@@ -135,19 +151,23 @@ class SPMMetricsSender(io: ActorRef, retryInterval: FiniteDuration, sendTimeout:
       become(sending(queue.enqueue(batches)))
     }
     case _: Send if queue.size >= maxQueueSize ⇒ {
-      log.warning(s"Send queue is full (${queue.size}). Rejecting metrics.")
+      numberOfBatchesDroppedDueToQueueSize = numberOfBatchesDroppedDueToQueueSize + 1
+      val batchesMessage = s"Number of dropped metrics batches: $numberOfBatchesDroppedDueToQueueSize"
+      log.warning(s"Send queue is full (${queue.size}). Rejecting metrics. $batchesMessage")
     }
     case Send(metrics) if metrics.isEmpty ⇒ /* do nothing */
     case Retry ⇒ {
       val (metrics, _) = queue.dequeue
       post(metrics)
     }
-    case resp: HttpResponse if resp.status.isFailure ⇒ {
-      log.warning(s"Metrics can't be sent. Response status: ${resp.status}. Scheduling retry.")
+    case resp: Response if resp.isFailure ⇒ {
+      numberOfRetriedBatches = numberOfRetriedBatches + 1
+      log.warning(s"Metrics can't be sent. Response status: ${resp.getStatusCode}. Scheduling retry. Total retries to date: $numberOfRetriedBatches")
       context.system.scheduler.scheduleOnce(retryInterval, self, Retry)
     }
     case ScheduleRetry ⇒ {
-      log.warning("Metrics can't be sent. Scheduling retry.")
+      numberOfRetriedBatches = numberOfRetriedBatches + 1
+      log.warning("Metrics can't be sent. Scheduling retry. Total retries to date: $numberOfRetriedBatches")
       context.system.scheduler.scheduleOnce(retryInterval, self, Retry)
     }
   }
@@ -159,8 +179,8 @@ object SPMMetricsSender {
 
   case class Send(metrics: List[SPMMetric])
 
-  def props(io: ActorRef, retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) =
-    Props(classOf[SPMMetricsSender], io, retryInterval, sendTimeout, maxQueueSize, url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount)
+  def props(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) =
+    Props(classOf[SPMMetricsSender], retryInterval, sendTimeout, maxQueueSize, url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount)
 
   private val IndexTypeHeader = Map("index" -> Map("_type" -> "log", "_index" -> "spm-receiver"))
 
@@ -168,11 +188,11 @@ object SPMMetricsSender {
 
   import spray.json.DefaultJsonProtocol._
 
-  private def encodeBody(metrics: List[SPMMetric]): String = {
+  private def encodeBody(metrics: List[SPMMetric]): Array[Byte] = {
     val body = metrics.map { metric ⇒
       Map("body" -> SPMMetric.format(metric)).toJson
     }.toList
-    (IndexTypeHeader.toJson :: body).mkString("\n")
+    (IndexTypeHeader.toJson :: body).mkString("\n").getBytes(StandardCharsets.UTF_8)
   }
 
   private def encodeTraceBody(metrics: List[SPMMetric], traceSegments: List[SPMMetric], token: String): Array[Byte] = {
@@ -184,4 +204,35 @@ object SPMMetricsSender {
     }
     baos.toByteArray
   }
+}
+
+trait HttpClient {
+  def post(uri: String, payload: Array[Byte]): Future[Response]
+}
+
+class AsyncHttpClient(sendTimeout: Timeout, logger: LoggingAdapter) extends HttpClient {
+  val cf = new DefaultAsyncHttpClientConfig.Builder().setRequestTimeout(
+    sendTimeout.duration.toMillis.toInt).build()
+  val aclient = new DefaultAsyncHttpClient(cf)
+
+  import scala.concurrent.ExecutionContext.Implicits.global
+
+  override def post(uri: String, payload: Array[Byte]) = {
+    val javaFuture = aclient.preparePost(uri).setBody(payload).execute(
+      new AsyncCompletionHandler[Response] {
+        override def onCompleted(response: Response): Response = {
+          logger.debug(s"${response.getStatusCode} ${response.getStatusText}")
+          response
+        }
+
+        override def onThrowable(t: Throwable): Unit =
+          logger.error(t, s"Unable to send metrics to SPM: ${t.getMessage}")
+      })
+    Future {
+      blocking {
+        javaFuture.get
+      }
+    }
+  }
+
 }

@@ -16,18 +16,29 @@
 
 package kamon.spm
 
-import akka.testkit.TestProbe
+import java.nio.charset.StandardCharsets
+
+import scala.concurrent.{ Await, Future, Promise }
+import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.Success
+
+import org.asynchttpclient.{ HttpResponseStatus, Response }
+import org.mockito.Mockito.{ mock, when }
+import org.scalatest.concurrent.Eventually._
+import org.scalatest.mockito.MockitoSugar
+import org.scalatest.time.{ Span, Seconds }
+
+import akka.actor.Props
+import akka.testkit.TestActorRef
 import akka.util.Timeout
 import kamon.Kamon
 import kamon.metric.instrument.Time
 import kamon.spm.SPMMetricsSender.Send
 import kamon.testkit.BaseKamonSpec
 import kamon.util.MilliTimestamp
-import spray.http.{ HttpRequest, HttpResponse, StatusCodes }
 
-import scala.concurrent.duration._
-
-class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") {
+class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with MockitoSugar {
 
   private def testMetrics(prefix: String = ""): List[SPMMetric] = {
     (0 until 2).map { i ⇒
@@ -37,61 +48,74 @@ class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") {
     }.toList
   }
 
+  case class RequestData(uri: String, payload: Array[Byte])
+
+  class MockHttpClient(httpResponseCode: Int = 200) extends HttpClient {
+    val requests = new java.util.concurrent.ArrayBlockingQueue[RequestData](100)
+
+    override def post(uri: String, payload: Array[Byte]): Future[Response] = {
+      requests.add(RequestData(uri, payload))
+      response
+    }
+
+    def dequeueRequest() = Future {
+      requests.take()
+    }
+
+    def response = Future {
+      val response = mock[Response]
+      when(response.getStatusCode).thenReturn(httpResponseCode)
+      when(response.hasResponseStatus()).thenReturn(true)
+      response
+    }
+  }
+
+  class MockedSPMMetricsSender(mockHttpClient: MockHttpClient, retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String,
+    token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends SPMMetricsSender(retryInterval, sendTimeout, maxQueueSize,
+    url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount) {
+    override val httpClient = mockHttpClient
+  }
+
   "spm metrics sender" should {
     "send metrics to receiver" in {
-      val io = TestProbe()
-
-      val sender = system.actorOf(SPMMetricsSender.props(io.ref, 5 seconds, Timeout(5 seconds), 100, "http://localhost:1234", "http://localhost:1234", "host-1", "1234", 10, 10))
+      val sender = TestActorRef(Props(new MockedSPMMetricsSender(new MockHttpClient, 5 seconds, Timeout(5 seconds), 100, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
       sender ! Send(testMetrics())
 
-      val request = io.expectMsgPF(1 second) {
-        case req: HttpRequest ⇒ req
-      }
+      val client = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender].httpClient
+      val request = Await.result(client.dequeueRequest(), 2 seconds)
+      request.uri shouldEqual "http://localhost:1234/api?host=host-1&token=1234"
 
-      request.uri.query.get("host") should be(Some("host-1"))
-      request.uri.query.get("token") should be(Some("1234"))
-
-      val payload = request.entity.asString
-
+      val payload = new String(request.payload, StandardCharsets.UTF_8)
       payload.split("\n") should have length 3
     }
 
     "resend metrics in case of exception or failure response status" in {
-      val io = TestProbe()
-
-      val sender = system.actorOf(SPMMetricsSender.props(io.ref, 2 seconds, Timeout(5 seconds), 100, "http://localhost:1234", "http://localhost:1234", "host-1", "1234", 10, 10))
+      val mockHttpClient = new MockHttpClient(404)
+      val sender = TestActorRef(Props(new MockedSPMMetricsSender(mockHttpClient, 2 seconds, Timeout(5 seconds), 100, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
       sender ! Send(testMetrics())
 
-      io.expectMsgClass(classOf[HttpRequest])
+      val senderActor = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
+      eventually(timeout(Span(5, Seconds))) {
+        senderActor.numberOfRetriedBatches should be >= 1
+      }
 
-      io.sender() ! "Unknown message" /* should trigger classcast exception */
-
-      io.expectMsgClass(3 seconds, classOf[HttpRequest])
-
-      io.sender() ! HttpResponse(status = StatusCodes.NotFound)
-
-      io.expectMsgClass(3 seconds, classOf[HttpRequest])
-
-      io.sender() ! HttpResponse(status = StatusCodes.OK)
-
-      io.expectNoMsg(3 seconds)
     }
 
     "ignore new metrics in case when send queue is full" in {
-      val io = TestProbe()
-
-      val sender = system.actorOf(SPMMetricsSender.props(io.ref, 2 seconds, Timeout(5 seconds), 5, "http://localhost:1234", "http://localhost:1234", "host-1", "1234", 10, 10))
+      val mockHttpClient = new MockHttpClient {
+        override def response = Promise[Response].future
+      }
+      val sender = TestActorRef(Props(new MockedSPMMetricsSender(mockHttpClient, 2 seconds, Timeout(5 seconds), 5, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
 
       (0 until 5).foreach(_ ⇒ sender ! Send(testMetrics()))
 
       sender ! Send(testMetrics())
 
-      (0 until 5).foreach { _ ⇒
-        io.expectMsgClass(classOf[HttpRequest])
-        sender ! HttpResponse(status = StatusCodes.OK)
+      val senderActor = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
+      eventually(timeout(Span(5, Seconds))) {
+        senderActor.numberOfBatchesDroppedDueToQueueSize shouldEqual 1
       }
 
-      io.expectNoMsg(3 seconds)
     }
   }
 }

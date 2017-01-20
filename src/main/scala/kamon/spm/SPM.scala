@@ -24,7 +24,6 @@ import akka.io.IO
 import akka.util.Timeout
 import kamon.Kamon
 import kamon.util.ConfigTools.Syntax
-import spray.can.Http
 
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
@@ -64,9 +63,9 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
     }
   }.toList
 
-  val sender = system.actorOf(SPMMetricsSender.props(IO(Http), retryInterval, Timeout(sendTimeout), maxQueueSize, url, tracingUrl, hostname, token, traceDurationThreshold.toInt, maxTraceErrorsCount.toInt), "spm-metrics-sender")
+  val sender = system.actorOf(SPMMetricsSender.props(retryInterval, Timeout(sendTimeout), maxQueueSize, url, tracingUrl, hostname, token, traceDurationThreshold.toInt, maxTraceErrorsCount.toInt), "spm-metrics-sender")
 
-  var subscriber = system.actorOf(SPMMetricsSubscriber.props(sender, 50 seconds, subscriptions), "spm-metrics-subscriber")
+  val subscriber = system.actorOf(SPMMetricsSubscriber.props(sender, 50 seconds, subscriptions), "spm-metrics-subscriber")
 
   log.info(s"kamon-spm extension started. Hostname = ${hostname}, url = ${url}. Tracing url=${tracingUrl}")
 }
