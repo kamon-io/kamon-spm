@@ -1,9 +1,7 @@
 SPM Integration    ![Build Status](https://travis-ci.org/kamon-io/kamon-spm.svg?branch=master)
 ==========================
-
 [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/kamon-io/Kamon?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
-***kamon-spm*** [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.kamon/kamon-spm_2.11/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.kamon/kamon-spm_2.11)
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.kamon/kamon-spm_2.12/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.kamon/kamon-spm_2.12)
 
 Reporting Metrics to SPM
 =======================
@@ -14,6 +12,23 @@ Installation
 ------------
 
 [Sign up]. [Create 'Akka' app] in SPM. Get your SPM app token. Add `kamon-spm` dependency to your project.
+
+### Getting Started
+
+Kamon akka-spm module is currently available for Scala 2.10, 2.11 and 2.12.
+
+Supported releases and dependencies are shown below.
+
+| kamon-spm  | status | jdk  | scala            |
+|:------:|:------:|:----:|------------------|
+|  0.6.5 | stable | 1.8+ |  2.10, 2.11, 2.12  |
+
+To get started with SBT, simply add the following to your `build.sbt`
+file:
+
+```scala
+libraryDependencies += "kamon.io" %% "kamon-spm" % "0.6.5"
+```
 
 Configuration
 -------------

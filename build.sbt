@@ -1,5 +1,5 @@
 /* =========================================================================================
- * Copyright © 2013-2016 the kamon project <http://kamon.io/>
+ * Copyright © 2013-2017 the kamon project <http://kamon.io/>
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
  * except in compliance with the License. You may obtain a copy of the License at
@@ -14,14 +14,17 @@
  */
 
 
-import Settings._
-import Dependencies._
+val kamonCore        = "io.kamon"                   %%  "kamon-core"            % "0.6.5"
+val asyncHttpClient   = "org.asynchttpclient"       %   "async-http-client"     % "2.0.25"
+val sprayJson         = "io.spray"                  %%  "spray-json"            % "1.3.3"
+val libThrift         = "org.apache.thrift"         %   "libthrift"             % "0.9.2"
+val mockito           = "org.mockito"               %   "mockito-core"          % "2.6.3"
+
 
 lazy val root = (project in file("."))
   .settings(name := "kamon-spm")
-  .settings(basicSettings: _*)
-  .settings(formatSettings: _*)
+  .settings(Seq(scalaVersion := "2.12.1", crossScalaVersions := Seq("2.10.6", "2.11.8", "2.12.1")))
   .settings(
       libraryDependencies ++=
-        compileScope(kamonCore, asyncHttpClient, sprayJson, akkaSlf4j, libThrift) ++
-        testScope(scalatest, akkaTestKit, mockito, slf4jApi, slf4jnop))
+        compileScope(kamonCore, asyncHttpClient, sprayJson, libThrift) ++
+        testScope(scalatest, akkaDependency("testkit").value, mockito, slf4jApi, slf4jnop))
