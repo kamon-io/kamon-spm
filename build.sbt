@@ -20,10 +20,10 @@ val sprayJson         = "io.spray"                  %%  "spray-json"            
 val libThrift         = "org.apache.thrift"         %   "libthrift"             % "0.9.2"
 val mockito           = "org.mockito"               %   "mockito-core"          % "2.6.3"
 
+name := "kamon-spm"
 
-lazy val root = (project in file("."))
-  .settings(name := "kamon-spm")
-  .settings(
-      libraryDependencies ++=
-        compileScope(kamonCore, asyncHttpClient, sprayJson, libThrift) ++
-        testScope(scalatest, akkaDependency("testkit").value, mockito, slf4jApi, slf4jnop))
+libraryDependencies ++=
+  compileScope(kamonCore, asyncHttpClient, sprayJson, libThrift) ++
+  testScope(scalatest, akkaDependency("testkit").value, mockito, slf4jApi, slf4jnop)
+
+resolvers += Resolver.bintrayRepo("kamon-io", "releases")
