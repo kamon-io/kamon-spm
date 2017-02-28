@@ -21,13 +21,13 @@ Supported releases and dependencies are shown below.
 
 | kamon-spm  | status | jdk  | scala            |
 |:------:|:------:|:----:|------------------|
-|  0.6.5 | stable | 1.8+ |  2.10, 2.11, 2.12  |
+|  0.6.6 | stable | 1.8+ |  2.10, 2.11, 2.12  |
 
 To get started with SBT, simply add the following to your `build.sbt`
 file:
 
 ```scala
-libraryDependencies += "io.kamon" %% "kamon-spm" % "0.6.5"
+libraryDependencies += "io.kamon" %% "kamon-spm" % "0.6.6"
 ```
 
 Configuration
@@ -49,7 +49,7 @@ SPM backend extension requires the property `kamon.spm.token` to be defined. SPM
 
 To see a full example of Kamon SPM Backend configuration look at [application.conf] in [sample Akka/Play app] with Kamon and SPM.
 
-**Note:** By default this extension uses hostname resolved using `InetAddress.getLocalHost.getHostName`. However, hostname can be redefined using `kamon.spm.hostname-alias` property. 
+**Note:** By default this extension uses hostname resolved using `InetAddress.getLocalHost.getHostName`. However, hostname can be redefined using `kamon.spm.hostname-alias` property.
 
 Visualisation
 -------------
