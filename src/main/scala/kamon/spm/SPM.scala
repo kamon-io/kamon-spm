@@ -51,16 +51,29 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
   val token = config.getString("token")
   val traceDurationThreshold = config.getString("trace-duration-threshhold")
   val maxTraceErrorsCount = config.getString("max-trace-errors-count")
-  val proxy = config.getString("proxy-server")
-  val proxyPort = config.getInt("proxy-port")
-  val proxyUser = config.getString("proxy-user")
-  val proxyUserPassword = config.getString("proxy-password")
-  val proxyProps = new Properties();
+
+  val proxy = System.getProperty("http.proxyHost")
+  val proxyProps = new Properties()
   if (proxy != null && !proxy.isEmpty) {
-    proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
-    proxyProps.setProperty(ProxyUtils.PROXY_PORT, proxyPort.toString)
-    proxyProps.setProperty(ProxyUtils.PROXY_USER, proxyUser)
-    proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, proxyUserPassword)
+    val proxyPort = System.getProperty("http.proxyPort")
+    if (proxyPort == null || proxyPort.isEmpty) {
+      log.error(s"Proxy port not specified")
+    } else {
+      proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
+      proxyProps.setProperty(ProxyUtils.PROXY_PORT, proxyPort)
+      val proxyUser = System.getProperty("http.proxyUser")
+      val proxyPassword = System.getProperty("http.proxyUser")
+      proxyProps.setProperty(ProxyUtils.PROXY_USER, if (proxyUser == null) "" else  proxyUser)
+      proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, if (proxyPassword == null) "" else proxyPassword)
+    }
+  } else {
+    val proxy = config.getString("proxy-server")
+    if (proxy != null && !proxy.isEmpty) {
+      proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
+      proxyProps.setProperty(ProxyUtils.PROXY_PORT, config.getInt("proxy-port").toString)
+      proxyProps.setProperty(ProxyUtils.PROXY_USER, config.getString("proxy-user"))
+      proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, config.getString("proxy-password"))
+    }
   }
 
   val hostname = if (config.hasPath("hostname-alias")) {
@@ -81,5 +94,5 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
   val subscriber = system.actorOf(SPMMetricsSubscriber.props(sender, 50 seconds, subscriptions), "spm-metrics-subscriber")
 
   log.info(s"kamon-spm extension started. Hostname = ${hostname}, url = ${url}. Tracing url=${tracingUrl}")
-  if (proxy != null && !proxy.isEmpty) log.info(s"You are using proxy = ${proxy}, port = ${proxyPort}.")
+  if (!proxyProps.isEmpty) log.info(s"You are using proxy = ${proxyProps.getProperty(ProxyUtils.PROXY_HOST)}, port = ${proxyProps.getProperty(ProxyUtils.PROXY_PORT)}.")
 }
