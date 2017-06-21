@@ -17,6 +17,7 @@
 package kamon.spm
 
 import java.net.InetAddress
+import java.util.Properties
 
 import akka.actor._
 import akka.event.Logging
@@ -24,6 +25,7 @@ import akka.io.IO
 import akka.util.Timeout
 import kamon.Kamon
 import kamon.util.ConfigTools.Syntax
+import org.asynchttpclient.util.ProxyUtils
 
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
@@ -49,6 +51,17 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
   val token = config.getString("token")
   val traceDurationThreshold = config.getString("trace-duration-threshhold")
   val maxTraceErrorsCount = config.getString("max-trace-errors-count")
+  val proxy = config.getString("proxy-server")
+  val proxyPort = config.getInt("proxy-port")
+  val proxyUser = config.getString("proxy-user")
+  val proxyUserPassword = config.getString("proxy-password")
+  val proxyProps = new Properties();
+  if (proxy != null && !proxy.isEmpty) {
+    proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
+    proxyProps.setProperty(ProxyUtils.PROXY_PORT, proxyPort.toString)
+    proxyProps.setProperty(ProxyUtils.PROXY_USER, proxyUser)
+    proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, proxyUserPassword)
+  }
 
   val hostname = if (config.hasPath("hostname-alias")) {
     config.getString("hostname-alias")
@@ -63,9 +76,10 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
     }
   }.toList
 
-  val sender = system.actorOf(SPMMetricsSender.props(retryInterval, Timeout(sendTimeout), maxQueueSize, url, tracingUrl, hostname, token, traceDurationThreshold.toInt, maxTraceErrorsCount.toInt), "spm-metrics-sender")
+  val sender = system.actorOf(SPMMetricsSender.props(retryInterval, Timeout(sendTimeout), maxQueueSize, url, tracingUrl, hostname, token, traceDurationThreshold.toInt, maxTraceErrorsCount.toInt, proxyProps), "spm-metrics-sender")
 
   val subscriber = system.actorOf(SPMMetricsSubscriber.props(sender, 50 seconds, subscriptions), "spm-metrics-subscriber")
 
   log.info(s"kamon-spm extension started. Hostname = ${hostname}, url = ${url}. Tracing url=${tracingUrl}")
+  if (proxy != null && !proxy.isEmpty) log.info(s"You are using proxy = ${proxy}, port = ${proxyPort}.")
 }
