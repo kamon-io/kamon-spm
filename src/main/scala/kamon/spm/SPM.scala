@@ -17,6 +17,7 @@
 package kamon.spm
 
 import java.net.InetAddress
+import java.util.Properties
 
 import akka.actor._
 import akka.event.Logging
@@ -24,6 +25,7 @@ import akka.io.IO
 import akka.util.Timeout
 import kamon.Kamon
 import kamon.util.ConfigTools.Syntax
+import org.asynchttpclient.util.ProxyUtils
 
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
@@ -50,6 +52,30 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
   val traceDurationThreshold = config.getString("trace-duration-threshhold")
   val maxTraceErrorsCount = config.getString("max-trace-errors-count")
 
+  val proxy = System.getProperty("http.proxyHost")
+  val proxyProps = new Properties()
+  if (proxy != null && !proxy.isEmpty) {
+    val proxyPort = System.getProperty("http.proxyPort")
+    if (proxyPort == null || proxyPort.isEmpty) {
+      log.error(s"Proxy port not specified")
+    } else {
+      proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
+      proxyProps.setProperty(ProxyUtils.PROXY_PORT, proxyPort)
+      val proxyUser = System.getProperty("http.proxyUser")
+      val proxyPassword = System.getProperty("http.proxyUser")
+      proxyProps.setProperty(ProxyUtils.PROXY_USER, if (proxyUser == null) "" else  proxyUser)
+      proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, if (proxyPassword == null) "" else proxyPassword)
+    }
+  } else {
+    val proxy = config.getString("proxy-server")
+    if (proxy != null && !proxy.isEmpty) {
+      proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
+      proxyProps.setProperty(ProxyUtils.PROXY_PORT, config.getInt("proxy-port").toString)
+      proxyProps.setProperty(ProxyUtils.PROXY_USER, config.getString("proxy-user"))
+      proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, config.getString("proxy-password"))
+    }
+  }
+
   val hostname = if (config.hasPath("hostname-alias")) {
     config.getString("hostname-alias")
   } else {
@@ -63,9 +89,10 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
     }
   }.toList
 
-  val sender = system.actorOf(SPMMetricsSender.props(retryInterval, Timeout(sendTimeout), maxQueueSize, url, tracingUrl, hostname, token, traceDurationThreshold.toInt, maxTraceErrorsCount.toInt), "spm-metrics-sender")
+  val sender = system.actorOf(SPMMetricsSender.props(retryInterval, Timeout(sendTimeout), maxQueueSize, url, tracingUrl, hostname, token, traceDurationThreshold.toInt, maxTraceErrorsCount.toInt, proxyProps), "spm-metrics-sender")
 
   val subscriber = system.actorOf(SPMMetricsSubscriber.props(sender, 50 seconds, subscriptions), "spm-metrics-subscriber")
 
   log.info(s"kamon-spm extension started. Hostname = ${hostname}, url = ${url}. Tracing url=${tracingUrl}")
+  if (!proxyProps.isEmpty) log.info(s"You are using proxy = ${proxyProps.getProperty(ProxyUtils.PROXY_HOST)}, port = ${proxyProps.getProperty(ProxyUtils.PROXY_PORT)}.")
 }
