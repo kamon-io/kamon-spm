@@ -62,7 +62,7 @@ class SPMExtension(system: ExtendedActorSystem) extends Kamon.Extension {
       proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
       proxyProps.setProperty(ProxyUtils.PROXY_PORT, proxyPort)
       val proxyUser = System.getProperty("http.proxyUser")
-      val proxyPassword = System.getProperty("http.proxyUser")
+      val proxyPassword = System.getProperty("http.proxyPassword")
       proxyProps.setProperty(ProxyUtils.PROXY_USER, if (proxyUser == null) "" else  proxyUser)
       proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, if (proxyPassword == null) "" else proxyPassword)
     }
