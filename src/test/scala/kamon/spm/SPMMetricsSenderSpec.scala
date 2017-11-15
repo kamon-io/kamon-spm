@@ -17,18 +17,17 @@
 package kamon.spm
 
 import java.nio.charset.StandardCharsets
+import java.util.Properties
 
-import scala.concurrent.{ Await, Future, Promise }
+import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Success
-
-import org.asynchttpclient.{ HttpResponseStatus, Response }
-import org.mockito.Mockito.{ mock, when }
+import org.asynchttpclient.{HttpResponseStatus, Response}
+import org.mockito.Mockito.{mock, when}
 import org.scalatest.concurrent.Eventually._
 import org.scalatest.mockito.MockitoSugar
-import org.scalatest.time.{ Span, Seconds }
-
+import org.scalatest.time.{Seconds, Span}
 import akka.actor.Props
 import akka.testkit.TestActorRef
 import akka.util.Timeout
@@ -72,7 +71,7 @@ class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with
 
   class MockedSPMMetricsSender(mockHttpClient: MockHttpClient, retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String,
     token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends SPMMetricsSender(retryInterval, sendTimeout, maxQueueSize,
-    url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount) {
+    url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount, new Properties()) {
     override val httpClient = mockHttpClient
   }
 

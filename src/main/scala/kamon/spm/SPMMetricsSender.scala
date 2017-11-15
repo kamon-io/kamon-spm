@@ -19,26 +19,27 @@ package kamon.spm
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import java.util.Properties
 
 import akka.actor._
-import akka.event.{ Logging, LoggingAdapter }
-import akka.pattern.{ ask, pipe }
+import akka.event.{Logging, LoggingAdapter}
+import akka.pattern.{ask, pipe}
 import akka.util.Timeout
 import spray.json._
-
-import org.asynchttpclient.{ AsyncCompletionHandler, DefaultAsyncHttpClient, DefaultAsyncHttpClientConfig, Response }
+import org.asynchttpclient._
+import org.asynchttpclient.util.ProxyUtils
 
 import scala.annotation.tailrec
-import scala.collection.immutable.{ Map, Queue }
+import scala.collection.immutable.{Map, Queue}
 import scala.concurrent.blocking
 import scala.concurrent.duration._
 import scala.concurrent.Future
 
-class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends Actor with ActorLogging {
+class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int, proxyProperties: Properties) extends Actor with ActorLogging {
   import context._
   import SPMMetricsSender._
 
-  val httpClient: HttpClient = new AsyncHttpClient(sendTimeout, Logging(system, classOf[SPMMetricsSender]))
+  val httpClient: HttpClient = new AsyncHttpClient(sendTimeout, Logging(system, classOf[SPMMetricsSender]), proxyProperties)
   var numberOfBatchesDroppedDueToQueueSize = 0
   var numberOfRetriedBatches = 0
 
@@ -179,8 +180,8 @@ object SPMMetricsSender {
 
   case class Send(metrics: List[SPMMetric])
 
-  def props(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) =
-    Props(classOf[SPMMetricsSender], retryInterval, sendTimeout, maxQueueSize, url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount)
+  def props(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String, token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int,proxyProperties: Properties) =
+    Props(classOf[SPMMetricsSender], retryInterval, sendTimeout, maxQueueSize, url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount, proxyProperties)
 
   private val IndexTypeHeader = Map("index" -> Map("_type" -> "log", "_index" -> "spm-receiver"))
 
@@ -210,10 +211,14 @@ trait HttpClient {
   def post(uri: String, payload: Array[Byte]): Future[Response]
 }
 
-class AsyncHttpClient(sendTimeout: Timeout, logger: LoggingAdapter) extends HttpClient {
+class AsyncHttpClient(sendTimeout: Timeout, logger: LoggingAdapter, proxyProperties: Properties) extends HttpClient {
   val cf = new DefaultAsyncHttpClientConfig.Builder().setRequestTimeout(
-    sendTimeout.duration.toMillis.toInt).build()
-  val aclient = new DefaultAsyncHttpClient(cf)
+    sendTimeout.duration.toMillis.toInt)
+  if (!proxyProperties.isEmpty) {
+    val proxySelector = ProxyUtils.createProxyServerSelector(proxyProperties)
+    cf.setProxyServerSelector(proxySelector)
+  }
+  val aclient = new DefaultAsyncHttpClient(cf.build())
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
