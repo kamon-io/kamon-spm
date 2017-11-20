@@ -73,7 +73,6 @@ object SPMMetric {
 
   def traceFormat(metric: SPMMetric, token: String, segments: List[SPMMetric]): Array[Byte] = metric match {
     case SPMMetric(_, _, _, _, tags, unit, histo: Histogram#SnapshotType) ⇒ {
-      val tracingMetrics = segments.filter(segments ⇒ (segments.tags.get("trace") == metric.name))
       val event = new TTracingEvent()
       val thrift = new TPartialTransaction()
       val rnd = new Random()
@@ -93,14 +92,16 @@ object SPMMetric {
       segments.foreach((segment: SPMMetric) ⇒ {
         segment match {
           case SPMMetric(_, _, _, _, tags, unit, histo: Histogram#SnapshotType) ⇒ {
-            val tcall = new TCall()
-            tcall.setDuration(convert(unit, histo.max))
-            tcall.setStartTimestamp(segment.ts.millis)
-            tcall.setEndTimestamp(segment.ts.millis + convert(unit, histo.max))
-            tcall.setCallId(rnd.nextLong())
-            tcall.setParentCallId(callId)
-            tcall.setSignature(segment.name)
-            calls.add(tcall)
+            if (segment.tags.get("trace").get == metric.name) {
+              val tcall = new TCall()
+              tcall.setDuration(convert(unit, histo.max))
+              tcall.setStartTimestamp(segment.ts.millis)
+              tcall.setEndTimestamp(segment.ts.millis + convert(unit, histo.max))
+              tcall.setCallId(rnd.nextLong())
+              tcall.setParentCallId(callId)
+              tcall.setSignature(segment.name)
+              calls.add(tcall)
+            }
           }
           case others ⇒
         }

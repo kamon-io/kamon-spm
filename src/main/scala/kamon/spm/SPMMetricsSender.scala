@@ -68,7 +68,7 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
 
   private def postTraces(metrics: List[SPMMetric], segments: List[SPMMetric]): Unit = {
     val queryString = generateQueryString(Map("host" -> host, "token" -> token))
-    httpClient.post(s"$url$queryString", encodeTraceBody(metrics, segments, token)).recover {
+    httpClient.post(s"$tracingUrl$queryString", encodeTraceBody(metrics, segments, token)).recover {
       case t: Throwable ⇒ {
         log.error(t, "Can't post trace metrics.")
       }
@@ -112,7 +112,7 @@ class SPMMetricsSender(retryInterval: FiniteDuration, sendTimeout: Timeout, maxQ
     case Send(metrics) if metrics.nonEmpty ⇒ {
       try {
         val processedMetrics = preprocessTraceMetrics(metrics.filter(metric ⇒ ((metric.category == "trace") && SPMMetric.isTraceToStore(metric, traceDurationThreshold))))
-        val traceSegmentMetrics = processedMetrics.filter(metric ⇒ ((metric.category == "trace-segment")))
+        val traceSegmentMetrics = metrics.filter(metric ⇒ ((metric.category == "trace-segment")))
         if (processedMetrics.size > 0) {
           val tracingBatches = fragment(processedMetrics)
           postTraces(tracingBatches.head, traceSegmentMetrics)
