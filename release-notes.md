@@ -1,5 +1,8 @@
 kamon-spm release notes
 ------------------------
+### 20. Nov 2017: version 0.7.0
+
+- Bug fixes for tracing - by @qkoshelev
 
 ### 8. Aug 2017: version 0.6.9
 
