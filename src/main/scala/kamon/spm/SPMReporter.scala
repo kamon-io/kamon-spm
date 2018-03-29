@@ -53,16 +53,14 @@ class SPMReporter extends MetricReporter {
   val url = config.getString("receiver-url")
   val tracingUrl = config.getString("tracing-receiver-url")
   val token = config.getString("token")
+  val customMarker = config.getString("custom-metric-marker")
   val traceDurationThreshold = config.getString("trace-duration-threshhold").toLong
-  val maxTraceErrorsCount = config.getString("max-trace-errors-count").toLong
   private val IndexTypeHeader = Map("index" -> Map("_type" -> "log", "_index" -> "spm-receiver"))
   val host = if (config.hasPath("hostname-alias")) {
     config.getString("hostname-alias")
   } else {
     InetAddress.getLocalHost.getHostName
   }
-  var numberOfBatchesDroppedDueToQueueSize = 0
-  var numberOfRetriedBatches = 0
   var httpClient: AsyncHttpClient = null;
 
   override def start(): Unit = {
@@ -172,6 +170,7 @@ class SPMReporter extends MetricReporter {
 
   private def buildRequestBody(snapshot: PeriodSnapshot): Array[Byte] = {
     val timestamp: Long = (snapshot.from.toEpochMilli)
+
     val histograms = (snapshot.metrics.histograms ++ snapshot.metrics.rangeSamplers).map { metric ⇒
       Map("body" -> {
         val min = convert(metric.unit, metric.distribution.min)
@@ -187,7 +186,7 @@ class SPMReporter extends MetricReporter {
       ).toJson
     }.toList
 
-    val counters = (snapshot.metrics.counters ++ snapshot.metrics.gauges).map { metric ⇒
+    val counters = (snapshot.metrics.counters).map { metric ⇒
       Map("body" -> {
         metric.name match {
           case "host.file-system.activity" => getTagOrEmptyString(metric.tags, "operation") match {
@@ -197,14 +196,6 @@ class SPMReporter extends MetricReporter {
           }
           case "executor.tasks" => getTagOrEmptyString(metric.tags, "state") match {
             case "completed" => s"${timestamp}\t${"akka-dispatcher-processed-tasks"}\t${timestamp}\t\t0\t0\t${metric.value}\t0"
-            case _ => defaultMetricString(timestamp, metric.name)
-          }
-
-          case "executor.pool" => getTagOrEmptyString(metric.tags, "setting") match {
-            case "parallelism" => s"${timestamp}\t${"akka-dispatcher-parallelism"}\t${timestamp}\t0\t0\t${metric.value}\t0\t0"
-            case "min" => s"${timestamp}\t${"akka-dispatcher-min-pool-size"}\t${timestamp}\t${metric.value}\t0\t0\t0\t0"
-            case "max" => s"${timestamp}\t${"akka-dispatcher-max-pool-size"}\t${timestamp}\t0\t${metric.value}\t0\t0\t0"
-            case "corePoolSize" => s"${timestamp}\t${"akka-dispatcher-core-pool-size"}\t${timestamp}\t${metric.value}\t0\t0\t0\t0"
             case _ => defaultMetricString(timestamp, metric.name)
           }
           case "host.network.packets" => {
@@ -234,6 +225,28 @@ class SPMReporter extends MetricReporter {
               }
             }
           }
+          case _ => {
+            if (metric.tags.contains(customMarker)) {
+              s"${timestamp}\t${"counter-counter"}\t${timestamp}\t${metric.name}\t${metric.value}"
+            } else {
+              s"${prefix(metric, timestamp)}\t${metric.value}"
+            }
+          }
+        }
+      }
+      ).toJson
+    }.toList
+
+    val gauges = (snapshot.metrics.gauges).map { metric ⇒
+      Map("body" -> {
+        metric.name match {
+          case "executor.pool" => getTagOrEmptyString(metric.tags, "setting") match {
+            case "parallelism" => s"${timestamp}\t${"akka-dispatcher-parallelism"}\t${timestamp}\t0\t0\t${metric.value}\t0\t0"
+            case "min" => s"${timestamp}\t${"akka-dispatcher-min-pool-size"}\t${timestamp}\t${metric.value}\t0\t0\t0\t0"
+            case "max" => s"${timestamp}\t${"akka-dispatcher-max-pool-size"}\t${timestamp}\t0\t${metric.value}\t0\t0\t0"
+            case "corePoolSize" => s"${timestamp}\t${"akka-dispatcher-core-pool-size"}\t${timestamp}\t${metric.value}\t0\t0\t0\t0"
+            case _ => defaultMetricString(timestamp, metric.name)
+          }
           case "jvm.class-loading" => {
             getTagOrEmptyString(metric.tags, "mode") match {
               case "currently-loaded" => s"${timestamp}\t${"system-metric-classes-currently-loaded"}\t${timestamp}\t\t0\t${metric.value}\t0\t0"
@@ -248,12 +261,18 @@ class SPMReporter extends MetricReporter {
             case "total" => s"${timestamp}\t${"system-metric-thread-count"}\t${timestamp}\t\t0\t0\t${metric.value}\t1"
             case _ => defaultMetricString(timestamp, metric.name)
           }
-          case _ => s"${prefix(metric, timestamp)}\t${metric.value}"
+          case _ => {
+            if (metric.tags.contains(customMarker)) {
+              s"${timestamp}\t${"gauge-gauge"}\t${timestamp}\t${metric.name}\t0\t0\t${metric.value}\t1"
+            } else {
+              s"${prefix(metric, timestamp)}\t${metric.value}"
+            }
+          }
         }
       }
       ).toJson
     }.toList
-    (IndexTypeHeader.toJson :: histograms ::: counters).mkString("\n").getBytes(StandardCharsets.UTF_8)
+    (IndexTypeHeader.toJson :: histograms ::: counters ::: gauges).mkString("\n").getBytes(StandardCharsets.UTF_8)
   }
 
   private def prefix(metric: MetricDistribution, timestamp: Long): String = {
@@ -302,8 +321,8 @@ class SPMReporter extends MetricReporter {
         }
       }
       case _ => {
-        if (metric.tags.contains("custom")) {
-          s"${timestamp}\t${"histogram-histogram"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}"
+        if (metric.tags.contains(customMarker)) {
+          s"${timestamp}\t${"histogram-histogram"}\t${timestamp}\t${metric.name}"
         } else {
           defaultMetricString(timestamp, metric.name)
         }
@@ -321,13 +340,7 @@ class SPMReporter extends MetricReporter {
       }
       case "akka.actor.errors" => s"${timestamp}\t${"akka-actor-errors"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "path")}"
       case "akka.router.errors" => s"${timestamp}\t${"akka-router-errors"}\t${timestamp}\t"
-      case _ => {
-        if (metric.tags.contains("custom")) {
-          s"${timestamp}\t${"counter-counter"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}"
-        } else {
-          defaultMetricString(timestamp, metric.name)
-        }
-      }
+      case _ => defaultMetricString(timestamp, metric.name)
     }
   }
 
