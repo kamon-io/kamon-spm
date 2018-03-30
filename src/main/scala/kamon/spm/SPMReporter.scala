@@ -350,16 +350,6 @@ class SPMReporter extends MetricReporter {
     case _ ⇒ value
   }
 
-  private def createHttpClient(config: Configuration): DefaultAsyncHttpClient =
-    new DefaultAsyncHttpClient(new DefaultAsyncHttpClientConfig.Builder()
-      .setConnectTimeout(config.connectTimeout.toMillis.toInt)
-      .setReadTimeout(config.connectTimeout.toMillis.toInt)
-      .setRequestTimeout(config.connectTimeout.toMillis.toInt)
-      .build())
-
-  private case class Configuration(apiKey: String, connectTimeout: Duration, readTimeout: Duration, requestTimeout: Duration,
-                                   timeUnit: MeasurementUnit, informationUnit: MeasurementUnit)
-
   trait HttpClient {
     def post(uri: String, payload: Array[Byte]): Future[Response]
     def close()
