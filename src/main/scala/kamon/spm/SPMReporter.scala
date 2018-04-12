@@ -203,15 +203,15 @@ class SPMReporter extends MetricReporter {
               getTagOrEmptyString(metric.tags, "state") match {
                 case "error" => {
                   getTagOrEmptyString(metric.tags, "direction") match {
-                    case "transmitted" => s"${timestamp}\t${"system-metric-tx-errors"}\t${timestamp}\t0\t0\t0\t0\t${metric.value}"
-                    case "received" => s"${timestamp}\t${"system-metric-rx-errors"}\t${timestamp}\t0\t0\t0\t0\t${metric.value}"
+                    case "transmitted" => s"${timestamp}\t${"system-metric-tx-errors"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
+                    case "received" => s"${timestamp}\t${"system-metric-rx-errors"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
                     case _ => defaultMetricString(timestamp, metric.name)
                   }
                 }
                 case "dropped" => {
                   getTagOrEmptyString(metric.tags, "direction") match {
-                    case "transmitted" => s"${timestamp}\t${"system-metric-tx-dropped"}\t${timestamp}\t0\t0\t0\t0\t${metric.value}"
-                    case "received" => s"${timestamp}\t${"system-metric-rx-dropped"}\t${timestamp}\t0\t0\t0\t0\t${metric.value}"
+                    case "transmitted" => s"${timestamp}\t${"system-metric-tx-dropped"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
+                    case "received" => s"${timestamp}\t${"system-metric-rx-dropped"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
                     case _ => defaultMetricString(timestamp, metric.name)
                   }
                 }
@@ -219,8 +219,8 @@ class SPMReporter extends MetricReporter {
               }
             } else {
               getTagOrEmptyString(metric.tags, "direction") match {
-                case "transmitted" => s"${timestamp}\t${"system-metric-tx-bytes"}\t${timestamp}\t0\t0\t0\t${metric.value}\t0"
-                case "received" => s"${timestamp}\t${"system-metric-rx-bytes"}\t${timestamp}\t0\t0\t0\t${metric.value}\t0"
+                case "transmitted" => s"${timestamp}\t${"system-metric-tx-bytes"}\t${timestamp}\t\t0\t0\t${metric.value}\t0"
+                case "received" => s"${timestamp}\t${"system-metric-rx-bytes"}\t${timestamp}\t\t0\t0\t${metric.value}\t0"
                 case _ => defaultMetricString(timestamp, metric.name)
               }
             }
@@ -229,7 +229,7 @@ class SPMReporter extends MetricReporter {
             if (metric.tags.contains(customMarker)) {
               s"${timestamp}\t${"counter-counter"}\t${timestamp}\t${metric.name}\t${metric.value}"
             } else {
-              s"${prefix(metric, timestamp)}\t${metric.value}"
+              s"${prefix(metric, timestamp)}\t${convert(metric.unit, metric.value)}"
             }
           }
         }
@@ -241,10 +241,10 @@ class SPMReporter extends MetricReporter {
       Map("body" -> {
         metric.name match {
           case "executor.pool" => getTagOrEmptyString(metric.tags, "setting") match {
-            case "parallelism" => s"${timestamp}\t${"akka-dispatcher-parallelism"}\t${timestamp}\t0\t0\t${metric.value}\t0\t0"
-            case "min" => s"${timestamp}\t${"akka-dispatcher-min-pool-size"}\t${timestamp}\t${metric.value}\t0\t0\t0\t0"
-            case "max" => s"${timestamp}\t${"akka-dispatcher-max-pool-size"}\t${timestamp}\t0\t${metric.value}\t0\t0\t0"
-            case "corePoolSize" => s"${timestamp}\t${"akka-dispatcher-core-pool-size"}\t${timestamp}\t${metric.value}\t0\t0\t0\t0"
+            case "parallelism" => s"${timestamp}\t${"akka-dispatcher-parallelism"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t0\t0\t${convert(metric.unit, metric.value)}\t0"
+            case "min" => s"${timestamp}\t${"akka-dispatcher-min-pool-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t${convert(metric.unit, metric.value)}\t0\t0\t0"
+            case "max" => s"${timestamp}\t${"akka-dispatcher-max-pool-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t${convert(metric.unit, metric.value)}\t0\t0"
+            case "corePoolSize" => s"${timestamp}\t${"akka-dispatcher-core-pool-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t${convert(metric.unit, metric.value)}\t0\t0\t0"
             case _ => defaultMetricString(timestamp, metric.name)
           }
           case "jvm.class-loading" => {
@@ -265,7 +265,7 @@ class SPMReporter extends MetricReporter {
             if (metric.tags.contains(customMarker)) {
               s"${timestamp}\t${"gauge-gauge"}\t${timestamp}\t${metric.name}\t0\t0\t${metric.value}\t1"
             } else {
-              s"${prefix(metric, timestamp)}\t${metric.value}"
+              s"${prefix(metric, timestamp)}\t${convert(metric.unit, metric.value)}"
             }
           }
         }
@@ -344,9 +344,9 @@ class SPMReporter extends MetricReporter {
     }
   }
 
-  private def convert(unit: MeasurementUnit, value: Long): Long = unit.dimension match {
-    case MeasurementUnit.time ⇒ MeasurementUnit.scale(value, unit, time.milliseconds).toLong
-    case Information ⇒ MeasurementUnit.scale(value, unit, information.bytes).toLong
+  private def convert(unit: MeasurementUnit, value: Long): Long = unit.dimension.name match {
+    case "time" ⇒ MeasurementUnit.scale(value, unit, time.milliseconds).toLong
+    case "information" ⇒ MeasurementUnit.scale(value, unit, information.bytes).toLong
     case _ ⇒ value
   }
 
