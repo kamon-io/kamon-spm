@@ -16,105 +16,47 @@
 
 package kamon.spm
 
-import java.nio.charset.StandardCharsets
-import java.util.Properties
+import java.time.Instant
 
-import scala.concurrent.{Await, Future, Promise}
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.Success
-import org.asynchttpclient.{HttpResponseStatus, Response}
-import org.mockito.Mockito.{mock, when}
-import org.scalatest.concurrent.Eventually._
-import org.scalatest.mockito.MockitoSugar
-import org.scalatest.time.{Seconds, Span}
-import akka.actor.Props
-import akka.testkit.TestActorRef
-import akka.util.Timeout
+import com.typesafe.config.ConfigValueFactory
 import kamon.Kamon
-import kamon.metric.instrument.Time
-import kamon.spm.SPMMetricsSender.Send
-import kamon.testkit.BaseKamonSpec
-import kamon.util.MilliTimestamp
+import kamon.metric.{Histogram, _}
+import org.scalatest.{Matchers, WordSpec}
 
-class SPMMetricsSenderSpec extends BaseKamonSpec("spm-metrics-sender-spec") with MockitoSugar {
+class SPMMetricsSenderSpec extends WordSpec with Matchers {
 
-  private def testMetrics(prefix: String = ""): List[SPMMetric] = {
-    (0 until 2).map { i ⇒
-      val histo = Kamon.metrics.histogram(s"histo-$i")
-      histo.record(1)
-      SPMMetric(new MilliTimestamp(123L), "histogram", s"${prefix}-entry-$i", s"histo-$i", Map(), Time.Milliseconds, histo.collect(collectionContext))
-    }.toList
-  }
-
-  case class RequestData(uri: String, payload: Array[Byte])
-
-  class MockHttpClient(httpResponseCode: Int = 200) extends HttpClient {
-    val requests = new java.util.concurrent.ArrayBlockingQueue[RequestData](100)
-
-    override def post(uri: String, payload: Array[Byte]): Future[Response] = {
-      requests.add(RequestData(uri, payload))
-      response
-    }
-
-    def dequeueRequest() = Future {
-      requests.take()
-    }
-
-    def response = Future {
-      val response = mock[Response]
-      when(response.getStatusCode).thenReturn(httpResponseCode)
-      when(response.hasResponseStatus()).thenReturn(true)
-      response
+  "the SPMReporter" should {
+    "process all metric types" in {
+      Kamon.reconfigure(Kamon.config().withValue("kamon.spm.token", ConfigValueFactory.fromAnyRef("")))
+      val reporter = new SPMReporter()
+      val snapshot = new PeriodSnapshot(Instant.now, Instant.now, createMetricsSnapshot(200L))
+      reporter.reportPeriodSnapshot(snapshot)
     }
   }
 
-  class MockedSPMMetricsSender(mockHttpClient: MockHttpClient, retryInterval: FiniteDuration, sendTimeout: Timeout, maxQueueSize: Int, url: String, tracingUrl: String, host: String,
-    token: String, traceDurationThreshold: Int, maxTraceErrorsCount: Int) extends SPMMetricsSender(retryInterval, sendTimeout, maxQueueSize,
-    url, tracingUrl, host, token, traceDurationThreshold, maxTraceErrorsCount, new Properties()) {
-    override val httpClient = mockHttpClient
+  def createMetricsSnapshot(value: Long) = MetricsSnapshot(
+    histograms = Seq(createDistributionSnapshot(s"histogram", Map("metric" -> "histogram"), MeasurementUnit.time.microseconds, DynamicRange.Fine)(value)),
+    rangeSamplers = Seq(createDistributionSnapshot(s"gauge", Map("metric" -> "gauge"), MeasurementUnit.time.microseconds, DynamicRange.Default)(value)),
+    gauges = Seq(createValueSnapshot(s"gauge", Map("metric" -> "gauge"), MeasurementUnit.information.bytes, value)),
+    counters = Seq(createValueSnapshot(s"counter", Map("metric" -> "counter"), MeasurementUnit.information.bytes, value))
+  )
+
+  def createValueSnapshot(metric: String, tags: Map[String, String], unit: MeasurementUnit, value: Long): MetricValue = {
+    MetricValue(metric, tags, unit, value)
   }
 
-  "spm metrics sender" should {
-    "send metrics to receiver" in {
-      val sender = TestActorRef(Props(new MockedSPMMetricsSender(new MockHttpClient, 5 seconds, Timeout(5 seconds), 100, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
-      sender ! Send(testMetrics())
+  def createDistributionSnapshot(metric: String, tags: Map[String, String], unit: MeasurementUnit, dynamicRange: DynamicRange)(values: Long*): MetricDistribution = {
+    val histogram = Kamon.histogram(metric, unit, dynamicRange).refine(tags)
+    values.foreach(histogram.record)
+    MetricDistribution(metric, tags, unit, dynamicRange, histogram.distribution(resetState = true))
+  }
 
-      val client = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender].httpClient
-      val request = Await.result(client.dequeueRequest(), 2 seconds)
-      request.uri shouldEqual "http://localhost:1234/api?host=host-1&token=1234"
-
-      val payload = new String(request.payload, StandardCharsets.UTF_8)
-      payload.split("\n") should have length 3
-    }
-
-    "resend metrics in case of exception or failure response status" in {
-      val mockHttpClient = new MockHttpClient(404)
-      val sender = TestActorRef(Props(new MockedSPMMetricsSender(mockHttpClient, 2 seconds, Timeout(5 seconds), 100, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
-      sender ! Send(testMetrics())
-
-      val senderActor = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
-      eventually(timeout(Span(5, Seconds))) {
-        senderActor.numberOfRetriedBatches should be >= 1
+  implicit class HistogramMetricSyntax(histogram: Histogram) {
+    def distribution(resetState: Boolean = true): Distribution =
+      histogram match {
+        case hm: HistogramMetric    => hm.refine(Map.empty[String, String]).distribution(resetState)
+        case h: AtomicHdrHistogram  => h.snapshot(resetState).distribution
+        case h: HdrHistogram        => h.snapshot(resetState).distribution
       }
-
-    }
-
-    "ignore new metrics in case when send queue is full" in {
-      val mockHttpClient = new MockHttpClient {
-        override def response = Promise[Response].future
-      }
-      val sender = TestActorRef(Props(new MockedSPMMetricsSender(mockHttpClient, 2 seconds, Timeout(5 seconds), 5, "http://localhost:1234/api", "http://localhost:1234/trace", "host-1", "1234", 10, 10)))
-
-      (0 until 5).foreach(_ ⇒ sender ! Send(testMetrics()))
-
-      sender ! Send(testMetrics())
-
-      val senderActor = sender.underlyingActor.asInstanceOf[MockedSPMMetricsSender]
-      eventually(timeout(Span(5, Seconds))) {
-        senderActor.numberOfBatchesDroppedDueToQueueSize shouldEqual 1
-      }
-
-    }
   }
 }
