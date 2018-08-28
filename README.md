@@ -88,8 +88,8 @@ CPU:
 <img class="img-responsive" src="http://kamon.io/assets/img/spm-module-cpu.png">
 
 
-[SPM]: http://sematext.com/spm/index.html
-[Sign up]: https://apps.sematext.com/users-web/register.do
-[Create 'Akka' app]: https://apps.sematext.com/spm-reports/registerApplication.do
+[SPM]: https://sematext.com/spm
+[Sign up]: https://apps.sematext.com/ui/registration
+[Create 'Akka' app]: https://apps.sematext.com/ui/integrations
 [Sample Akka app]: https://github.com/sematext/kamon-spm-example
 [application.conf]: https://github.com/sematext/kamon-spm-example/blob/master/src/main/resources/application.conf
