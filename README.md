@@ -21,7 +21,8 @@ Supported releases and dependencies are shown below.
 
 | kamon-spm  | status | jdk  | scala            |
 |:------:|:------:|:----:|------------------|
-|  0.6.7 | stable | 1.8+ |  2.10, 2.11, 2.12  |
+|  1.1.1 | stable | 1.8+ |  2.10, 2.11, 2.12  |
+|  1.1.2 | stable | 1.8+ |  2.10, 2.11, 2.12  |
 
 To get started with SBT, simply add the following to your `build.sbt`
 file:
@@ -87,8 +88,8 @@ CPU:
 <img class="img-responsive" src="http://kamon.io/assets/img/spm-module-cpu.png">
 
 
-[SPM]: http://sematext.com/spm/index.html
-[Sign up]: https://apps.sematext.com/users-web/register.do
-[Create 'Akka' app]: https://apps.sematext.com/spm-reports/registerApplication.do
+[SPM]: https://sematext.com/spm
+[Sign up]: https://apps.sematext.com/ui/registration
+[Create 'Akka' app]: https://apps.sematext.com/ui/integrations
 [Sample Akka app]: https://github.com/sematext/kamon-spm-example
 [application.conf]: https://github.com/sematext/kamon-spm-example/blob/master/src/main/resources/application.conf
