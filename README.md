@@ -60,7 +60,7 @@ SPM backend extension requires the property `kamon.spm.token` to be defined. SPM
   }
 ```
 
-To see a full example of Kamon SPM Backend configuration look at [application.conf] with Kamon and SPM.
+To see a full example of Kamon SPM Backend configuration look at [application.conf] in [Sample Akka app] with Kamon and SPM.
 
 **Note:** By default this extension uses hostname resolved using `InetAddress.getLocalHost.getHostName`. However, hostname can be redefined using `kamon.spm.hostname-alias` property.
 
