@@ -20,28 +20,22 @@ import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.text.{DecimalFormat, DecimalFormatSymbols}
-import java.time.Duration
-import java.util
-import java.util.{Locale, Properties}
+import java.util.Properties
 
+import com.sematext.spm.client.tracing.thrift._
 import com.typesafe.config.Config
-import kamon.metric.MeasurementUnit.Dimension.Information
 import kamon.metric.MeasurementUnit.{information, time}
 import kamon.metric.{MeasurementUnit, _}
 import kamon.{Kamon, MetricReporter}
-import org.asynchttpclient.util.ProxyUtils
 import org.asynchttpclient._
+import org.asynchttpclient.util.ProxyUtils
 import org.slf4j.{Logger, LoggerFactory}
+import spray.json.DefaultJsonProtocol._
+import spray.json._
 
 import scala.collection.immutable.Map
-import scala.concurrent.{Future, blocking}
-import spray.json._
-import DefaultJsonProtocol._
-import com.sematext.spm.client.tracing.thrift._
-
-import scala.concurrent._
-import ExecutionContext.Implicits.global
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Future, blocking, _}
 import scala.util.Random
 
 
@@ -77,16 +71,16 @@ class SPMReporter extends MetricReporter {
         proxyProps.setProperty(ProxyUtils.PROXY_PORT, proxyPort)
         val proxyUser = System.getProperty("http.proxyUser")
         val proxyPassword = System.getProperty("http.proxyPassword")
-        proxyProps.setProperty(ProxyUtils.PROXY_USER, if (proxyUser == null) "" else proxyUser)
-        proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, if (proxyPassword == null) "" else proxyPassword)
+        proxyProps.setProperty("org.asynchttpclient.AsyncHttpClientConfig.proxy.user", if (proxyUser == null) "" else proxyUser)
+        proxyProps.setProperty("org.asynchttpclient.AsyncHttpClientConfig.proxy.password", if (proxyPassword == null) "" else proxyPassword)
       }
     } else {
       val proxy = config.getString("proxy-server")
       if (proxy != null && !proxy.isEmpty) {
         proxyProps.setProperty(ProxyUtils.PROXY_HOST, proxy)
         proxyProps.setProperty(ProxyUtils.PROXY_PORT, config.getInt("proxy-port").toString)
-        proxyProps.setProperty(ProxyUtils.PROXY_USER, config.getString("proxy-user"))
-        proxyProps.setProperty(ProxyUtils.PROXY_PASSWORD, config.getString("proxy-password"))
+        proxyProps.setProperty("org.asynchttpclient.AsyncHttpClientConfig.proxy.user", config.getString("proxy-user"))
+        proxyProps.setProperty("org.asynchttpclient.AsyncHttpClientConfig.proxy.password", config.getString("proxy-password"))
       }
     }
     httpClient = new AsyncHttpClient(sendTimeout.toMillis.toInt, log, proxyProps)
