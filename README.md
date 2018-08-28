@@ -59,7 +59,7 @@ SPM backend extension requires the property `kamon.spm.token` to be defined. SPM
   }
 ```
 
-To see a full example of Kamon SPM Backend configuration look at [application.conf](https://github.com/sematext/kamon-spm-example/blob/master/src/main/resources/application.conf) with Kamon and SPM.
+To see a full example of Kamon SPM Backend configuration look at [application.conf] with Kamon and SPM.
 
 **Note:** By default this extension uses hostname resolved using `InetAddress.getLocalHost.getHostName`. However, hostname can be redefined using `kamon.spm.hostname-alias` property.
 
@@ -90,5 +90,5 @@ CPU:
 [SPM]: http://sematext.com/spm/index.html
 [Sign up]: https://apps.sematext.com/users-web/register.do
 [Create 'Akka' app]: https://apps.sematext.com/spm-reports/registerApplication.do
-[sample Akka app]: https://github.com/sematext/kamon-spm-example
+[Sample Akka app]: https://github.com/sematext/kamon-spm-example
 [application.conf]: https://github.com/sematext/kamon-spm-example/blob/master/src/main/resources/application.conf
