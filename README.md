@@ -22,6 +22,7 @@ Supported releases and dependencies are shown below.
 | kamon-spm  | status | jdk  | scala            |
 |:------:|:------:|:----:|------------------|
 |  0.6.7 | stable | 1.8+ |  2.10, 2.11, 2.12  |
+|  1.1.1 | stable | 1.8+ |  2.10, 2.11, 2.12  |
 |  1.1.2 | stable | 1.8+ |  2.10, 2.11, 2.12  |
 
 To get started with SBT, simply add the following to your `build.sbt`
