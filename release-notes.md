@@ -1,5 +1,9 @@
 kamon-spm release notes
 ------------------------
+### 27. Aug 2018: version 1.1.2
+
+- Update AsyncHttpClient version to 2.5.2 - by @sivasamyk
+
 ### 18. Apr 2018: version 1.1.1
 
 - Switch kamon-spm to 1.1.x version - by @qkoshelev
