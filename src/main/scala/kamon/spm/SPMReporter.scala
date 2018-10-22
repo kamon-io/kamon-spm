@@ -300,7 +300,20 @@ class SPMReporter extends MetricReporter {
       case "jvm.gc" => addMetric(s"akka.gc=${getTagOrEmptyString(metric.tags, "collector")}", s"jvm.gc.collection.time=${sum}")(processedMetrics)
       case "jvm.gc.promotion" => addMetric(s"akka.gc=${getTagOrEmptyString(metric.tags, "space")}", s"jvm.gc.collection.count=${sum}")(processedMetrics)
 
-      case "jvm.memory" => addMetric(DEFAULT_DIM, s"jvm.${getTagOrEmptyString(metric.tags, "segment", true)}.${getTagOrEmptyString(metric.tags, "measure", true)}.sum=${sum},jvm.${getTagOrEmptyString(metric.tags, "segment", true)}.${getTagOrEmptyString(metric.tags, "measure", true)}.count=${count}")(processedMetrics)
+      case "jvm.memory" => {
+        val segment = getTagOrEmptyString(metric.tags, "segment", true) // heap/nonheap/metaspace/psoldgen...
+        val measure = getTagOrEmptyString(metric.tags, "measure", true) // used/max/committed
+        segment match {
+          case "heap" | "nonheap" => {
+            addMetric(DEFAULT_DIM,
+              s"jvm.${segment}.${measure}.sum=${sum},jvm.${segment}.${measure}.count=${count}")(processedMetrics)
+          }
+          case _ => {
+            addMetric(s"akka.memory.pool=${segment}",
+              s"memory.pool.${measure}=${max}")(processedMetrics)
+          }
+        }
+      }
       case "span.processing-time" => {
         getTagOrEmptyString(metric.tags, "error") match {
           case "false" => addMetric(s"akka.trace=${getTagOrEmptyString(metric.tags, "operation")}", s"tracing.requests.time.min=${min},tracing.requests.time.max=${max},tracing.requests.time.sum=${sum},tracing.requests.time.count=${count}")(processedMetrics)
