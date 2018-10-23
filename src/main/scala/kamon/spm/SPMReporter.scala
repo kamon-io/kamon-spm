@@ -389,7 +389,6 @@ class SPMReporter extends MetricReporter {
   }
 
   private def post(body: Array[Byte]): Unit = {
-    System.out.println(new String(body));
     httpClient.post(s"$url", body).recover {
       case t: Throwable ⇒ {
         log.error("Can't post metrics.", t)
