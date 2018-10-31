@@ -1,5 +1,9 @@
 kamon-spm release notes
 ------------------------
+### 23. Oct 2018: version 1.1.3
+
+- Update reporter to send metrics using Influx Line Protocol format - by @sivasamyk
+
 ### 27. Aug 2018: version 1.1.2
 
 - Update AsyncHttpClient version to 2.5.2 - by @sivasamyk

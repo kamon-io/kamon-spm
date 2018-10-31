@@ -30,8 +30,6 @@ import kamon.{Kamon, MetricReporter}
 import org.asynchttpclient._
 import org.asynchttpclient.util.ProxyUtils
 import org.slf4j.{Logger, LoggerFactory}
-import spray.json.DefaultJsonProtocol._
-import spray.json._
 
 import scala.collection.immutable.Map
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -48,14 +46,14 @@ class SPMReporter extends MetricReporter {
   val tracingUrl = config.getString("tracing-receiver-url")
   val token = config.getString("token")
   val customMarker = config.getString("custom-metric-marker")
-  val traceDurationThreshold = config.getString("trace-duration-threshhold").toLong
-  private val IndexTypeHeader = Map("index" -> Map("_type" -> "log", "_index" -> "spm-receiver"))
+  val traceDurationThreshold = config.getString("trace-duration-threshold").toLong
   val host = if (config.hasPath("hostname-alias")) {
     config.getString("hostname-alias")
   } else {
     InetAddress.getLocalHost.getHostName
   }
   var httpClient: AsyncHttpClient = null;
+  var DEFAULT_DIM = "default"
 
   override def start(): Unit = {
     log.info("Starting kamon-spm reporter")
@@ -114,6 +112,15 @@ class SPMReporter extends MetricReporter {
     }
   }
 
+  private def addMetric(dimension: String, metrics: String)(processedMetrics: scala.collection.mutable.Map[String, String]) {
+    if (processedMetrics.contains(dimension)) {
+      val st = processedMetrics.get(dimension)
+      processedMetrics.put(dimension, st.get.concat(",").concat(metrics))
+    } else {
+      processedMetrics.put(dimension, metrics)
+    }
+  }
+
   private def buildTraceRequestBody(snapshot: PeriodSnapshot): Array[Byte] = {
     val timestamp: Long = (snapshot.from.toEpochMilli)
     val baos = new ByteArrayOutputStream()
@@ -163,179 +170,171 @@ class SPMReporter extends MetricReporter {
   }
 
   private def buildRequestBody(snapshot: PeriodSnapshot): Array[Byte] = {
-    val timestamp: Long = (snapshot.from.toEpochMilli)
-
-    val histograms = (snapshot.metrics.histograms ++ snapshot.metrics.rangeSamplers).map { metric ⇒
-      Map("body" -> {
-        val min = convert(metric.unit, metric.distribution.min)
-        val max = convert(metric.unit, metric.distribution.max)
-        val sum = convert(metric.unit, metric.distribution.sum)
-        val p50 = convert(metric.unit, metric.distribution.percentile(50D).value)
-        val p90 = convert(metric.unit, metric.distribution.percentile(90D).value)
-        val p95 = convert(metric.unit, metric.distribution.percentile(95D).value)
-        val p99 = convert(metric.unit, metric.distribution.percentile(99D).value)
-        val p995 = convert(metric.unit, metric.distribution.percentile(99.5D).value)
-        s"${prefix(metric, timestamp)}\t${min}\t${max}\t${sum}\t${metric.distribution.count}\t${p50}\t${p90}\t${p95}\t${p99}\t${p995}"
+    val timestamp: Long = snapshot.from.toEpochMilli
+    val processedMetrics = scala.collection.mutable.Map[String, String]()
+    (snapshot.metrics.histograms ++ snapshot.metrics.rangeSamplers).map { metric ⇒ buildHistograms(metric, processedMetrics)}
+    snapshot.metrics.counters.map { metric ⇒ buildCounters(metric, processedMetrics)}
+    snapshot.metrics.gauges.map { metric ⇒  buildGauges(metric, processedMetrics)}
+    val requestData = processedMetrics.view.map { case (k, v) =>
+      if (DEFAULT_DIM.equals(k)) {
+        prefix().concat(" ").concat(v).concat(" ").concat(timestamp.toString).concat("000000").trim.replaceAll(" +", " ")
+      } else {
+        prefix().concat(",").concat(k).concat(" ").concat(v).concat(" ").concat(timestamp.toString).concat("000000").trim.replaceAll(" +", " ")
       }
-      ).toJson
     }.toList
-
-    val counters = (snapshot.metrics.counters).map { metric ⇒
-      Map("body" -> {
-        metric.name match {
-          case "host.file-system.activity" => getTagOrEmptyString(metric.tags, "operation") match {
-            case "read" => s"${timestamp}\t${"system-metric-file-system-reads"}\t${timestamp}\tfile-system\t0\t0\t${metric.value}\t0"
-            case "write" => s"${timestamp}\t${"system-metric-file-system-writes"}\t${timestamp}\tfile-system\t0\t0\t${metric.value}\t0"
-            case _ => defaultMetricString(timestamp, metric.name)
-          }
-          case "executor.tasks" => getTagOrEmptyString(metric.tags, "state") match {
-            case "completed" => s"${timestamp}\t${"akka-dispatcher-processed-tasks"}\t${timestamp}\t\t0\t0\t${metric.value}\t0"
-            case _ => defaultMetricString(timestamp, metric.name)
-          }
-          case "host.network.packets" => {
-            if (metric.tags.contains("state")) {
-              getTagOrEmptyString(metric.tags, "state") match {
-                case "error" => {
-                  getTagOrEmptyString(metric.tags, "direction") match {
-                    case "transmitted" => s"${timestamp}\t${"system-metric-tx-errors"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
-                    case "received" => s"${timestamp}\t${"system-metric-rx-errors"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
-                    case _ => defaultMetricString(timestamp, metric.name)
-                  }
-                }
-                case "dropped" => {
-                  getTagOrEmptyString(metric.tags, "direction") match {
-                    case "transmitted" => s"${timestamp}\t${"system-metric-tx-dropped"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
-                    case "received" => s"${timestamp}\t${"system-metric-rx-dropped"}\t${timestamp}\t\t0\t0\t0\t${metric.value}"
-                    case _ => defaultMetricString(timestamp, metric.name)
-                  }
-                }
-                case _ => defaultMetricString(timestamp, metric.name)
-              }
-            } else {
-              getTagOrEmptyString(metric.tags, "direction") match {
-                case "transmitted" => s"${timestamp}\t${"system-metric-tx-bytes"}\t${timestamp}\t\t0\t0\t${metric.value}\t0"
-                case "received" => s"${timestamp}\t${"system-metric-rx-bytes"}\t${timestamp}\t\t0\t0\t${metric.value}\t0"
-                case _ => defaultMetricString(timestamp, metric.name)
-              }
-            }
-          }
-          case _ => {
-            if (metric.tags.contains(customMarker)) {
-              s"${timestamp}\t${"counter-counter"}\t${timestamp}\t${metric.name}\t${metric.value}"
-            } else {
-              s"${prefix(metric, timestamp)}\t${convert(metric.unit, metric.value)}"
-            }
-          }
-        }
-      }
-      ).toJson
-    }.toList
-
-    val gauges = (snapshot.metrics.gauges).map { metric ⇒
-      Map("body" -> {
-        metric.name match {
-          case "executor.pool" => getTagOrEmptyString(metric.tags, "setting") match {
-            case "parallelism" => s"${timestamp}\t${"akka-dispatcher-parallelism"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t0\t0\t${convert(metric.unit, metric.value)}\t0"
-            case "min" => s"${timestamp}\t${"akka-dispatcher-min-pool-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t${convert(metric.unit, metric.value)}\t0\t0\t0"
-            case "max" => s"${timestamp}\t${"akka-dispatcher-max-pool-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t${convert(metric.unit, metric.value)}\t0\t0"
-            case "corePoolSize" => s"${timestamp}\t${"akka-dispatcher-core-pool-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "name")}\t${convert(metric.unit, metric.value)}\t0\t0\t0"
-            case _ => defaultMetricString(timestamp, metric.name)
-          }
-          case "jvm.class-loading" => {
-            getTagOrEmptyString(metric.tags, "mode") match {
-              case "currently-loaded" => s"${timestamp}\t${"system-metric-classes-currently-loaded"}\t${timestamp}\t\t0\t${metric.value}\t0\t0"
-              case "unloaded" => s"${timestamp}\t${"system-metric-classes-unloaded"}\t${timestamp}\t\t0\t${metric.value}\t0\t0"
-              case "loaded" => s"${timestamp}\t${"system-metric-classes-loaded"}\t${timestamp}\t\t0\t${metric.value}\t0\t0"
-              case _ => defaultMetricString(timestamp, metric.name)
-            }
-          }
-          case "jvm.threads" => getTagOrEmptyString(metric.tags, "measure") match {
-            case "daemon" => s"${timestamp}\t${"system-metric-daemon-thread-count"}\t${timestamp}\t\t0\t0\t${metric.value}\t1"
-            case "peak" => s"${timestamp}\t${"system-metric-peak-thread-count"}\t${timestamp}\t\t0\t0\t${metric.value}\t1"
-            case "total" => s"${timestamp}\t${"system-metric-thread-count"}\t${timestamp}\t\t0\t0\t${metric.value}\t1"
-            case _ => defaultMetricString(timestamp, metric.name)
-          }
-          case _ => {
-            if (metric.tags.contains(customMarker)) {
-              s"${timestamp}\t${"gauge-gauge"}\t${timestamp}\t${metric.name}\t0\t0\t${metric.value}\t1"
-            } else {
-              s"${prefix(metric, timestamp)}\t${convert(metric.unit, metric.value)}"
-            }
-          }
-        }
-      }
-      ).toJson
-    }.toList
-    (IndexTypeHeader.toJson :: histograms ::: counters ::: gauges).mkString("\n").getBytes(StandardCharsets.UTF_8)
+    requestData.mkString("\n").getBytes(StandardCharsets.UTF_8)
   }
 
-  private def prefix(metric: MetricDistribution, timestamp: Long): String = {
+  private def buildCounters(metric: MetricValue, processedMetrics: scala.collection.mutable.Map[String, String]) = {
     metric.name match {
-      case "host.cpu" => s"${timestamp}\t${"system-metric-cpu-" + getTagOrEmptyString(metric.tags, "mode")}\t${timestamp}\t"
-      case "host.load-average" => {
-        getTagOrEmptyString(metric.tags, "period") match {
-          case "1" => s"${timestamp}\t${"system-metric-one-minute"}\t${timestamp}\t"
-          case "5" => s"${timestamp}\t${"system-metric-five-minutes"}\t${timestamp}\t"
-          case "15" => s"${timestamp}\t${"system-metric-fifteen-minutes"}\t${timestamp}\t"
-          case _ => defaultMetricString(timestamp, metric.name)
-        }
-      }
-      case "host.swap" => s"${timestamp}\t${"system-metric-swap-" + getTagOrEmptyString(metric.tags, "mode")}\t${timestamp}\t"
-      case "host.memory" => s"${timestamp}\t${"system-metric-memory-" + getTagOrEmptyString(metric.tags, "mode")}\t${timestamp}\t"
-      case "akka.actor.time-in-mailbox" => s"${timestamp}\t${"akka-actor-time-in-mailbox"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "path")}"
-      case "akka.actor.processing-time" => s"${timestamp}\t${"akka-actor-processing-time"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "path")}"
-      case "akka.actor.mailbox-size" => s"${timestamp}\t${"akka-actor-mailbox-size"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "path")}"
-      case "executor.queue" => s"${timestamp}\t${"akka-dispatcher-queued-tasks-count"}\t${timestamp}\t"
-      case "executor.threads" => {
-        getTagOrEmptyString(metric.tags, "state") match {
-          case "total" => s"${timestamp}\t${"akka-dispatcher-running-threads"}\t${timestamp}\t"
-          case "active" => s"${timestamp}\t${"akka-dispatcher-active-threads"}\t${timestamp}\t"
-          case _ => defaultMetricString(timestamp, metric.name)
-        }
-      }
-      case "akka.router.routing-time" => s"${timestamp}\t${"akka-router-routing-time"}\t${timestamp}\t"
-      case "akka.router.time-in-mailbox" => s"${timestamp}\t${"akka-router-time-in-mailbox"}\t${timestamp}\t"
-      case "akka.router.processing-time" => s"${timestamp}\t${"akka-router-processing-time"}\t${timestamp}\t"
-      case "jvm.gc" => s"${timestamp}\t${"system-metric-garbage-collection-time"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "collector")}"
-      case "jvm.gc.promotion" => s"${timestamp}\t${"system-metric-garbage-collection-count"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "space")}"
-      case "jvm.memory" => s"${timestamp}\t${"system-metric-" + getTagOrEmptyString(metric.tags, "segment") + "-" + getTagOrEmptyString(metric.tags, "measure")}\t${timestamp}\t"
-      case "span.processing-time" => {
-        getTagOrEmptyString(metric.tags, "error") match {
-          case "false" => s"${timestamp}\t${"trace-elapsed-time"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "operation")}"
-          case "true" => s"${timestamp}\t${"trace-errors"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "operation")}"
-          case _ => defaultMetricString(timestamp, metric.name)
-        }
-      }
-      case "process.cpu" => {
-        getTagOrEmptyString(metric.tags, "mode") match {
-          case "system" => s"${timestamp}\t${"system-metric-process-system-cpu"}\t${timestamp}\t"
-          case "total" => s"${timestamp}\t${"system-metric-process-cpu"}\t${timestamp}\t"
-          case "user" => s"${timestamp}\t${"system-metric-process-user-cpu"}\t${timestamp}\t"
-          case _ => defaultMetricString(timestamp, metric.name)
+      case "host.file-system.activity" => addMetric(DEFAULT_DIM, s"os.disk.io.${getTagOrEmptyString(metric.tags, "operation")}=${metric.value}")(processedMetrics)
+      case "akka.actor.errors" => addMetric(s"akka.actor=${getTagOrEmptyString(metric.tags, "path")}", s"actor.errors=${metric.value}")(processedMetrics)
+      case "akka.router.errors" => addMetric(DEFAULT_DIM, s"router.processing.errors=${metric.value}")(processedMetrics)
+      case "executor.tasks" => addMetric(DEFAULT_DIM, s"dispatcher.executor.tasks.processed=${metric.value}")(processedMetrics)
+      case "host.network.packets" => {
+        if (metric.tags.contains("state")) {
+          getTagOrEmptyString(metric.tags, "state") match {
+            case "error" => {
+              getTagOrEmptyString(metric.tags, "direction") match {
+                case "transmitted" => addMetric(DEFAULT_DIM, s"os.network.tx.errors.sum=${metric.value},os.network.tx.errors.count=1")(processedMetrics)
+                case "received" => addMetric(DEFAULT_DIM, s"os.network.rx.errors.sum=${metric.value},os.network.rx.errors.count=1")(processedMetrics)
+                case _ => ""
+              }
+            }
+            case "dropped" => {
+              getTagOrEmptyString(metric.tags, "direction") match {
+                case "transmitted" => addMetric(DEFAULT_DIM, s"os.network.tx.dropped.sum=${metric.value},os.network.tx.dropped.count=1")(processedMetrics)
+                case "received" => addMetric(DEFAULT_DIM, s"os.network.rx.dropped.sum=${metric.value},os.network.rx.dropped.count=1")(processedMetrics)
+                case _ => ""
+              }
+            }
+            case _ => ""
+          }
+        } else {
+          getTagOrEmptyString(metric.tags, "direction") match {
+            case "transmitted" => addMetric(DEFAULT_DIM, s"os.network.tx.rate=${metric.value}")(processedMetrics)
+            case "received" => addMetric(DEFAULT_DIM, s"os.network.rx.rate=${metric.value}")(processedMetrics)
+            case _ => ""
+          }
         }
       }
       case _ => {
         if (metric.tags.contains(customMarker)) {
-          s"${timestamp}\t${"histogram-histogram"}\t${timestamp}\t${metric.name}"
+          addMetric(s"akka.metric=counter-counter", s"custom.counter.count=${metric.value}")(processedMetrics)
         } else {
-          defaultMetricString(timestamp, metric.name)
+          s""
+        }
+      }
+    }
+  }
+
+  private def buildGauges(metric: MetricValue, processedMetrics: scala.collection.mutable.Map[String, String]) = {
+    metric.name match {
+      case "executor.pool" => getTagOrEmptyString(metric.tags, "setting") match {
+        case "parallelism" => addMetric(s"akka.dispatcher=${getTagOrEmptyString(metric.tags, "name")}", s"dispatcher.fj.parallelism=${convert(metric.unit, metric.value)}")(processedMetrics)
+        case "min" => addMetric(s"akka.dispatcher=${getTagOrEmptyString(metric.tags, "name")}", s"dispatcher.executor.pool=${convert(metric.unit, metric.value)}")(processedMetrics)
+        case "max" => addMetric(s"akka.dispatcher=${getTagOrEmptyString(metric.tags, "name")}", s"dispatcher.executor.pool.max=${convert(metric.unit, metric.value)}")(processedMetrics)
+        case "corePoolSize" => addMetric(s"akka.dispatcher=${getTagOrEmptyString(metric.tags, "name")}", s"dispatcher.executor.pool.core=${convert(metric.unit, metric.value)}")(processedMetrics)
+        case _ => ""
+      }
+      case "jvm.class-loading" => {
+        getTagOrEmptyString(metric.tags, "mode") match {
+          case "currently-loaded" => addMetric(DEFAULT_DIM, s"jvm.classes.loaded=${metric.value}")(processedMetrics)
+          case "unloaded" => addMetric(DEFAULT_DIM, s"jvm.classes.unloaded=${metric.value}")(processedMetrics)
+          case "loaded" => addMetric(DEFAULT_DIM, s"jvm.classes.loaded.total=${metric.value}")(processedMetrics)
+          case _ => ""
+        }
+      }
+      case "jvm.threads" => getTagOrEmptyString(metric.tags, "measure") match {
+        case "daemon" => addMetric(DEFAULT_DIM, s"jvm.threads.deamon.sum=${metric.value},jvm.threads.deamon.count=1")(processedMetrics)
+        case "peak" => addMetric(DEFAULT_DIM, s"jvm.threads.max.sum=${metric.value},jvm.threads.max.count=1")(processedMetrics)
+        case "total" => addMetric(DEFAULT_DIM, s"jvm.threads.sum=${metric.value},jvm.threads.count=1")(processedMetrics)
+        case _ => ""
+      }
+      case _ => {
+        if (metric.tags.contains(customMarker)) {
+          addMetric("akka.metric=counter-counter", s"custom.counter.sum=${metric.value}")(processedMetrics)
+        } else {
+          s""
+        }
+      }
+    }
+  }
+
+  private def buildHistograms(metric: MetricDistribution, processedMetrics: scala.collection.mutable.Map[String, String]) = {
+    val min = convert(metric.unit, metric.distribution.min)
+    val max = convert(metric.unit, metric.distribution.max)
+    val sum = convert(metric.unit, metric.distribution.sum)
+    val count = convert(metric.unit, metric.distribution.count);
+    val p50 = convert(metric.unit, metric.distribution.percentile(50D).value)
+    val p90 = convert(metric.unit, metric.distribution.percentile(90D).value)
+    val p95 = convert(metric.unit, metric.distribution.percentile(95D).value)
+    val p99 = convert(metric.unit, metric.distribution.percentile(99D).value)
+    val p995 = convert(metric.unit, metric.distribution.percentile(99.5D).value)
+
+
+    metric.name match {
+      case "host.cpu" => addMetric(DEFAULT_DIM, s"os.cpu.${getTagOrEmptyString(metric.tags, "mode")}.sum=${sum},os.cpu.${getTagOrEmptyString(metric.tags, "mode")}.count=${count}")(processedMetrics)
+      case "host.load-average" => addMetric(DEFAULT_DIM, s"os.load.${getTagOrEmptyString(metric.tags, "period")}min.sum=${sum},os.load.${getTagOrEmptyString(metric.tags, "period")}min.count=${count}")(processedMetrics)
+
+      case "host.swap" => addMetric(DEFAULT_DIM, s"os.swap.${getTagOrEmptyString(metric.tags, "mode")}.sum=${sum},os.swap.${{getTagOrEmptyString(metric.tags, "mode")}}.count=${count}")(processedMetrics)
+      case "host.memory" => addMetric(DEFAULT_DIM, s"os.memory.${getTagOrEmptyString(metric.tags, "mode")}.sum=${sum},os.memory.${{getTagOrEmptyString(metric.tags, "mode")}}.count=${count}")(processedMetrics)
+
+      case "akka.actor.time-in-mailbox" => addMetric(s"akka.actor=${getTagOrEmptyString(metric.tags, "path")}", s"actor.mailbox.time.min=${min},actor.mailbox.time.max=${max},actor.mailbox.time.sum=${sum},actor.mailbox.time.count=${count}")(processedMetrics)
+      case "akka.actor.processing-time" => addMetric(s"akka.actor=${getTagOrEmptyString(metric.tags, "path")}", s"actor.processing.time.min=${min},actor.processing.time.max=${max},actor.processing.time.sum=${sum},actor.processing.time.count=${count}")(processedMetrics)
+      case "akka.actor.mailbox-size" => addMetric(s"akka.actor=${getTagOrEmptyString(metric.tags, "path")}", s"actor.mailbox.size.sum=${sum},actor.mailbox.size.count=${count}")(processedMetrics)
+
+      case "akka.router.routing-time" =>  addMetric(s"akka.router=${getTagOrEmptyString(metric.tags, "name")}", s"router.routing.time.min=${min},router.routing.time.max=${max},router.routing.time.sum=${sum},router.routing.time.count=${count}")(processedMetrics)
+      case "akka.router.time-in-mailbox" =>  addMetric(s"akka.router=${getTagOrEmptyString(metric.tags, "name")}", s"router.mailbox.time.min=${min},router.mailbox.time.max=${max},router.mailbox.time.sum=${sum},router.mailbox.time.count=${count}")(processedMetrics)
+      case "akka.router.processing-time" =>  addMetric(s"akka.router=${getTagOrEmptyString(metric.tags, "name")}", s"router.processing.time.min=${min},router.processing.time.max=${max},router.processing.time.sum=${sum},router.processing.time.count=${count}")(processedMetrics)
+
+      case "executor.queue" => addMetric(DEFAULT_DIM, s"dispatcher.fj.tasks.queued=${max}")(processedMetrics)
+
+      case "executor.threads" => {
+        getTagOrEmptyString(metric.tags, "state") match {
+          case "total" => addMetric(DEFAULT_DIM, s"dispatcher.fj.threads.running=${max}")(processedMetrics)
+          case "active" => addMetric(DEFAULT_DIM, s"dispatcher.executor.threads.active=${max}")(processedMetrics)
+          case _ => ""
+        }
+      }
+      case "jvm.gc" => addMetric(s"akka.gc=${getTagOrEmptyString(metric.tags, "collector")}", s"jvm.gc.collection.time=${sum}")(processedMetrics)
+      case "jvm.gc.promotion" => addMetric(s"akka.gc=${getTagOrEmptyString(metric.tags, "space")}", s"jvm.gc.collection.count=${sum}")(processedMetrics)
+
+      case "jvm.memory" => {
+        val segment = getTagOrEmptyString(metric.tags, "segment", true) // heap/nonheap/metaspace/psoldgen...
+        val measure = getTagOrEmptyString(metric.tags, "measure", true) // used/max/committed
+        segment match {
+          case "heap" | "nonheap" => {
+            addMetric(DEFAULT_DIM,
+              s"jvm.${segment}.${measure}.sum=${sum},jvm.${segment}.${measure}.count=${count}")(processedMetrics)
+          }
+          case _ => {
+            addMetric(s"akka.memory.pool=${segment}",
+              s"memory.pool.${measure}=${max}")(processedMetrics)
+          }
+        }
+      }
+      case "span.processing-time" => {
+        getTagOrEmptyString(metric.tags, "error") match {
+          case "false" => addMetric(s"akka.trace=${getTagOrEmptyString(metric.tags, "operation")}", s"tracing.requests.time.min=${min},tracing.requests.time.max=${max},tracing.requests.time.sum=${sum},tracing.requests.time.count=${count}")(processedMetrics)
+          case "true" => addMetric(s"akka.trace=${getTagOrEmptyString(metric.tags, "operation")}", s"tracing.requests.errors=${count}")(processedMetrics)
+          case _ => ""
+        }
+      }
+      case "process.cpu" => addMetric(DEFAULT_DIM, s"process.cpu.${getTagOrEmptyString(metric.tags, "mode")}.count=${count},process.cpu.${getTagOrEmptyString(metric.tags, "mode")}.sum=${sum}")(processedMetrics)
+      case _ => {
+        if (metric.tags.contains(customMarker)) {
+          addMetric("metric=histogram-histogram", s"custom.histogram.min=${min},custom.histogram.max=${max},custom.histogram.sum=${sum},custom.histogram.count=${count},custom.histogram.p50=${p50},custom.histogram.p90=${p90},custom.histogram.p99=${p99}")(processedMetrics)
+        } else {
+          ""
         }
       }
 
     }
   }
 
-  private def prefix(metric: MetricValue, timestamp: Long): String = {
-    metric.name match {
-      case "host.file-system.activity" => getTagOrEmptyString(metric.tags, "operation") match {
-        case "read" => s"${timestamp}\t${"system-metric-file-system-reads"}\t${timestamp}\t"
-        case "write" => s"${timestamp}\t${"system-metric-file-system-writes"}\t${timestamp}\t"
-        case _ => defaultMetricString(timestamp, metric.name)
-      }
-      case "akka.actor.errors" => s"${timestamp}\t${"akka-actor-errors"}\t${timestamp}\t${getTagOrEmptyString(metric.tags, "path")}"
-      case "akka.router.errors" => s"${timestamp}\t${"akka-router-errors"}\t${timestamp}\t"
-      case _ => defaultMetricString(timestamp, metric.name)
-    }
+  private def prefix(): String = {
+    s"akka,token=${token},os.host=${host}"
   }
 
   private def convert(unit: MeasurementUnit, value: Long): Long = unit.dimension.name match {
@@ -355,12 +354,12 @@ class SPMReporter extends MetricReporter {
       val proxySelector = ProxyUtils.createProxyServerSelector(proxyProperties)
       cf.setProxyServerSelector(proxySelector)
     }
-    val aclient = new DefaultAsyncHttpClient(cf.build())
+    val asyncClient = new DefaultAsyncHttpClient(cf.build())
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
     override def post(uri: String, payload: Array[Byte]) = {
-      val javaFuture = aclient.preparePost(uri).setBody(payload).execute(
+      val javaFuture = asyncClient.preparePost(uri).setBody(payload).execute(
         new AsyncCompletionHandler[Response] {
           override def onCompleted(response: Response): Response = {
             logger.debug(s"${response.getStatusCode} ${response.getStatusText}")
@@ -377,7 +376,7 @@ class SPMReporter extends MetricReporter {
       }
     }
     override def close() = {
-      aclient.close()
+      asyncClient.close()
     }
 
   }
@@ -390,8 +389,7 @@ class SPMReporter extends MetricReporter {
   }
 
   private def post(body: Array[Byte]): Unit = {
-    val queryString = generateQueryString(Map("host" -> host, "token" -> token))
-    httpClient.post(s"$url$queryString", body).recover {
+    httpClient.post(s"$url", body).recover {
       case t: Throwable ⇒ {
         log.error("Can't post metrics.", t)
       }
@@ -408,16 +406,15 @@ class SPMReporter extends MetricReporter {
     }
   }
 
-  private def getTagOrEmptyString(tags: Map[String, String], tagname: String): String = {
+  private def getTagOrEmptyString(tags: Map[String, String], tagname: String, replaceDash: Boolean = false): String = {
     if (tags.contains(tagname)) {
-      tags.get(tagname).get
+      if (replaceDash) {
+        tags.get(tagname).get.replace("-","")
+      } else {
+        tags.get(tagname).get
+      }
     } else {
       ""
     }
   }
-
-  private def defaultMetricString(timestamp: Long, name: String): String = {
-    s"${timestamp}\t${name.replaceAll("\\.", "-")}\t${timestamp}\t"
-  }
 }
-

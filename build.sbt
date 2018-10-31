@@ -14,7 +14,7 @@
  */
 
 
-val kamonCore         = "io.kamon"                  %%  "kamon-core"            % "1.1.0"
+val kamonCore         = "io.kamon"                  %%  "kamon-core"            % "1.1.3"
 val asyncHttpClient   = "org.asynchttpclient"       %   "async-http-client"     % "2.5.2"
 val sprayJson         = "io.spray"                  %%  "spray-json"            % "1.3.3"
 val libThrift         = "org.apache.thrift"         %   "libthrift"             % "0.9.2"
